@@ -1,3 +1,3 @@
 return function()
-	print("Test!")
+	print("Testing Hello.luau")
 end
