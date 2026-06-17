@@ -3,12 +3,17 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local ProfileService = require(ServerScriptService.ServerPackages.profileservice)
+local ZoneSetup = require(script.ZoneSetup)
 
 Players.CharacterAutoLoads = false
 
 local FACTION_NONE = "None"
 local FACTION_SOLDIER = "Soldier"
 local FACTION_OUTCAST = "Outcast"
+
+local ZONE_BASE = "Zone_Base"
+local ZONE_NID = "Zone_Nid"
+local ZONE_TEST = "Zone_Test"
 
 local PROFILE_TEMPLATE = {
 	Faction = FACTION_NONE,
@@ -20,43 +25,10 @@ local PROFILE_TEMPLATE = {
 
 local PROFILE_STORE = ProfileService.GetProfileStore("Sov2242_PlayerData_V1", PROFILE_TEMPLATE)
 
-local SPAWN_FOLDER_NAME = "SpawnPoints"
-local SPAWN_NEUTRAL_BASE = "Spawn_Neutral_Base"
-local SPAWN_SOLDIER_BASE = "Spawn_Soldier_Base"
-local SPAWN_OUTCAST_HUB = "Spawn_Outcast_Hub"
-local SPAWN_TEST_ZONE = "Spawn_Test_Zone"
-
 local activeProfiles: {[Player]: any} = {}
-local spawnPoints: {[string]: SpawnLocation} = {}
 
-local function ensureSpawnLocation(
-	folder: Instance,
-	name: string,
-	cframe: CFrame,
-	color: Color3
-): SpawnLocation
-	local existing = folder:FindFirstChild(name)
-	if existing and existing:IsA("SpawnLocation") then
-		return existing
-	end
-
-	if existing then
-		existing:Destroy()
-	end
-
-	local spawn = Instance.new("SpawnLocation")
-	spawn.Name = name
-	spawn.Size = Vector3.new(6, 1, 6)
-	spawn.CFrame = cframe
-	spawn.Anchored = true
-	spawn.Neutral = true
-	spawn.CanCollide = true
-	spawn.Transparency = 0.2
-	spawn.Color = color
-	spawn.Parent = folder
-
-	return spawn
-end
+-- Pose les 4 zones (sol + panneau + point de spawn dédié) si elles n'existent pas déjà.
+ZoneSetup.Run()
 
 local function ensurePrompt(parent: Instance, name: string, actionText: string, objectText: string): ProximityPrompt
 	local existing = parent:FindFirstChild(name)
@@ -82,24 +54,19 @@ local function ensurePrompt(parent: Instance, name: string, actionText: string, 
 	return prompt
 end
 
-local function ensureWorldSetup()
-	local spawnFolder = Workspace:FindFirstChild(SPAWN_FOLDER_NAME)
-	if not spawnFolder then
-		spawnFolder = Instance.new("Folder")
-		spawnFolder.Name = SPAWN_FOLDER_NAME
-		spawnFolder.Parent = Workspace
+-- Le PNJ recruteur de la Base. Propose le choix définitif de faction.
+-- Volontairement situé DANS la zone Base : une recrue doit s'y rendre avant de
+-- pouvoir choisir, elle ne peut pas choisir depuis la Zone de Test.
+local function ensureRecruiterNpc(): (ProximityPrompt?, ProximityPrompt?)
+	local baseFolder = ZoneSetup.GetZoneFolder(ZONE_BASE)
+	if not baseFolder then
+		warn("ZoneSetup n'a pas encore créé Zone_Base, le recruteur ne peut pas être placé.")
+		return nil, nil
 	end
 
-	spawnPoints[SPAWN_NEUTRAL_BASE] =
-		ensureSpawnLocation(spawnFolder, SPAWN_NEUTRAL_BASE, CFrame.new(0, 6, 0), Color3.fromRGB(120, 150, 255))
-	spawnPoints[SPAWN_SOLDIER_BASE] =
-		ensureSpawnLocation(spawnFolder, SPAWN_SOLDIER_BASE, CFrame.new(16, 6, 0), Color3.fromRGB(80, 145, 255))
-	spawnPoints[SPAWN_OUTCAST_HUB] =
-		ensureSpawnLocation(spawnFolder, SPAWN_OUTCAST_HUB, CFrame.new(0, 6, 24), Color3.fromRGB(255, 170, 70))
-	spawnPoints[SPAWN_TEST_ZONE] =
-		ensureSpawnLocation(spawnFolder, SPAWN_TEST_ZONE, CFrame.new(120, 6, 0), Color3.fromRGB(255, 255, 120))
+	local basePosition = ZoneSetup.GetZonePosition(ZONE_BASE) or Vector3.new(0, 0, 0)
 
-	local recruiter = Workspace:FindFirstChild("FactionRecruiter")
+	local recruiter = baseFolder:FindFirstChild("FactionRecruiter")
 	if recruiter and not recruiter:IsA("BasePart") then
 		recruiter:Destroy()
 		recruiter = nil
@@ -109,39 +76,72 @@ local function ensureWorldSetup()
 		local recruiterPart = Instance.new("Part")
 		recruiterPart.Name = "FactionRecruiter"
 		recruiterPart.Size = Vector3.new(3, 6, 3)
-		recruiterPart.CFrame = CFrame.new(0, 3, -10)
+		recruiterPart.CFrame = CFrame.new(basePosition + Vector3.new(0, 3, -10))
 		recruiterPart.Anchored = true
 		recruiterPart.BrickColor = BrickColor.new("Dark stone grey")
-		recruiterPart.Parent = Workspace
+		recruiterPart.Parent = baseFolder
 		recruiter = recruiterPart
 	end
 
-	local soldierPrompt = ensurePrompt(
-		recruiter,
-		"ChooseSoldierPrompt",
-		"Join Soldiers",
-		"Recruitment Officer"
-	)
-	local outcastPrompt = ensurePrompt(
-		recruiter,
-		"ChooseOutcastPrompt",
-		"Join Outcasts",
-		"Recruitment Officer"
-	)
+	local stayPrompt = ensurePrompt(recruiter, "StaySoldierPrompt", "Rester Combattant", "Officier de Liaison")
+	local fleePrompt = ensurePrompt(recruiter, "FleeOutcastPrompt", "Fuir et devenir Fuyard", "Officier de Liaison")
 
-	return soldierPrompt, outcastPrompt
+	return stayPrompt, fleePrompt
+end
+
+-- Point de transit en Zone de Test : la recrue n'a pas encore de faction,
+-- elle doit interagir ici pour être emmenée à la Base où le choix se fera.
+-- Ceci ne change QUE la position physique du joueur, jamais son RespawnLocation :
+-- s'il meurt avant d'avoir choisi, il doit réapparaître en Zone de Test, pas à la Base.
+local function ensureTestToBaseTeleporter()
+	local testFolder = ZoneSetup.GetZoneFolder(ZONE_TEST)
+	if not testFolder then
+		warn("ZoneSetup n'a pas encore créé Zone_Test, le téléporteur ne peut pas être placé.")
+		return
+	end
+
+	local testPosition = ZoneSetup.GetZonePosition(ZONE_TEST) or Vector3.new(0, 0, 0)
+
+	local pad = testFolder:FindFirstChild("TeleportToBase")
+	if not pad then
+		local padPart = Instance.new("Part")
+		padPart.Name = "TeleportToBase"
+		padPart.Size = Vector3.new(6, 1, 6)
+		padPart.CFrame = CFrame.new(testPosition + Vector3.new(20, 1, 0))
+		padPart.Anchored = true
+		padPart.Color = Color3.fromRGB(200, 60, 60)
+		padPart.Parent = testFolder
+		pad = padPart
+	end
+
+	local prompt = ensurePrompt(pad, "GoToBasePrompt", "Se rendre à la Base", "Convoi de la Base")
+
+	prompt.Triggered:Connect(function(player: Player)
+		local baseSpawn = ZoneSetup.GetSpawnPoint(ZONE_BASE)
+		local character = player.Character
+		if not baseSpawn or not character then
+			return
+		end
+
+		local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if rootPart then
+			rootPart.CFrame = baseSpawn.CFrame + Vector3.new(0, 5, 0)
+		end
+	end)
 end
 
 local function getSpawnFromFaction(faction: string): SpawnLocation?
 	if faction == FACTION_SOLDIER then
-		return spawnPoints[SPAWN_SOLDIER_BASE]
+		return ZoneSetup.GetSpawnPoint(ZONE_BASE)
 	end
 
 	if faction == FACTION_OUTCAST then
-		return spawnPoints[SPAWN_OUTCAST_HUB]
+		return ZoneSetup.GetSpawnPoint(ZONE_NID)
 	end
 
-	return spawnPoints[SPAWN_NEUTRAL_BASE]
+	-- Pas encore de faction (FACTION_NONE) : on est une simple recrue potentielle,
+	-- on apparaît toujours en Zone de Test.
+	return ZoneSetup.GetSpawnPoint(ZONE_TEST)
 end
 
 local function spawnPlayer(player: Player)
@@ -183,15 +183,20 @@ local function setFaction(player: Player, faction: string)
 	spawnPlayer(player)
 end
 
-local soldierPrompt, outcastPrompt = ensureWorldSetup()
+local stayPrompt, fleePrompt = ensureRecruiterNpc()
+ensureTestToBaseTeleporter()
 
-soldierPrompt.Triggered:Connect(function(player)
-	setFaction(player, FACTION_SOLDIER)
-end)
+if stayPrompt then
+	stayPrompt.Triggered:Connect(function(player)
+		setFaction(player, FACTION_SOLDIER)
+	end)
+end
 
-outcastPrompt.Triggered:Connect(function(player)
-	setFaction(player, FACTION_OUTCAST)
-end)
+if fleePrompt then
+	fleePrompt.Triggered:Connect(function(player)
+		setFaction(player, FACTION_OUTCAST)
+	end)
+end
 
 local function loadPlayerProfile(player: Player)
 	local profile = PROFILE_STORE:LoadProfileAsync(("Player_%d"):format(player.UserId), "ForceLoad")
