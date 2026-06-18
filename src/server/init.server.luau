@@ -25,7 +25,7 @@ local PROFILE_TEMPLATE = {
 
 local PROFILE_STORE = ProfileService.GetProfileStore("Sov2242_PlayerData_V1", PROFILE_TEMPLATE)
 
-local activeProfiles: {[Player]: any} = {}
+local activeProfiles: { [Player]: any } = {}
 
 -- Pose les 4 zones (sol + panneau + point de spawn dédié) si elles n'existent pas déjà.
 ZoneSetup.Run()
@@ -54,9 +54,6 @@ local function ensurePrompt(parent: Instance, name: string, actionText: string, 
 	return prompt
 end
 
--- Le PNJ recruteur de la Base. Propose le choix définitif de faction.
--- Volontairement situé DANS la zone Base : une recrue doit s'y rendre avant de
--- pouvoir choisir, elle ne peut pas choisir depuis la Zone de Test.
 local function ensureRecruiterNpc(): (ProximityPrompt?, ProximityPrompt?)
 	local baseFolder = ZoneSetup.GetZoneFolder(ZONE_BASE)
 	if not baseFolder then
@@ -83,8 +80,38 @@ local function ensureRecruiterNpc(): (ProximityPrompt?, ProximityPrompt?)
 		recruiter = recruiterPart
 	end
 
-	local stayPrompt = ensurePrompt(recruiter, "StaySoldierPrompt", "Rester Combattant", "Officier de Liaison")
-	local fleePrompt = ensurePrompt(recruiter, "FleeOutcastPrompt", "Fuir et devenir Fuyard", "Officier de Liaison")
+	-- 🌟 CRÉATION DES ATTACHES VISUELLES POUR LES PROMPTS
+	-- Option 1 : Attache Gauche (Soldier)
+	local leftAnchor = recruiter:FindFirstChild("LeftPromptAnchor")
+	if not leftAnchor then
+		local part = Instance.new("Part")
+		part.Name = "LeftPromptAnchor"
+		part.Size = Vector3.new(1, 1, 1)
+		part.CFrame = recruiter.CFrame * CFrame.new(-2.5, 0, 0) -- Décale de 2.5 studs à gauche
+		part.Transparency = 1
+		part.CanCollide = false
+		part.Anchored = true
+		part.Parent = recruiter
+		leftAnchor = part
+	end
+
+	-- Option 2 : Attache Droite (Outcast)
+	local rightAnchor = recruiter:FindFirstChild("RightPromptAnchor")
+	if not rightAnchor then
+		local part = Instance.new("Part")
+		part.Name = "RightPromptAnchor"
+		part.Size = Vector3.new(1, 1, 1)
+		part.CFrame = recruiter.CFrame * CFrame.new(2.5, 0, 0) -- Décale de 2.5 studs à droite
+		part.Transparency = 1
+		part.CanCollide = false
+		part.Anchored = true
+		part.Parent = recruiter
+		rightAnchor = part
+	end
+
+	-- On met les prompts sur leurs attaches respectives au lieu de les empiler au même endroit
+	local stayPrompt = ensurePrompt(leftAnchor, "StaySoldierPrompt", "Rester Combattant", "Officier de Liaison")
+	local fleePrompt = ensurePrompt(rightAnchor, "FleeOutcastPrompt", "Fuir et devenir Fuyard", "Officier de Liaison")
 
 	return stayPrompt, fleePrompt
 end
@@ -252,3 +279,76 @@ game:BindToClose(function()
 		end
 	end
 end)
+-- ServerScriptService > Server > init.server.luau
+-- [REMPLACE LE BLOC DE FIN PAR CELUI-CI POUR CORRIGER L'ERREUR DE TIMING ET DE MEMBRE]
+
+local RunService = game:GetService("RunService")
+
+-- Ton UserId Roblox pour t'identifier en tant que Créateur
+local CREATOR_ID = 11071882653
+
+-- Fonction utilitaire interne pour reset un joueur proprement
+local function devResetData(player: Player)
+	local profile = activeProfiles[player]
+	if not profile then
+		warn("[DEV SYSTEM] Impossible de reset : Aucun profil trouvé dans activeProfiles pour " .. player.Name)
+		return
+	end
+
+	-- Réinitialisation directe de la table du profil en mémoire
+	profile.Data.Faction = FACTION_NONE
+	profile.Data.FactionLocked = false
+	profile.Data.CreditsC = 0
+	profile.Data.PiecesP = 0
+	profile.Data.PermanentInventory = {}
+
+	-- Écrasement des attributs pour synchroniser instantanément l'UI cliente
+	player:SetAttribute("Faction", FACTION_NONE)
+	player:SetAttribute("FactionLocked", false)
+
+	print("[DEV SYSTEM] Données réinitialisées avec succès pour " .. player.Name)
+
+	-- Force le joueur à réapparaître instantanément dans la Zone_Test (Spawn par défaut)
+	spawnPlayer(player)
+end
+
+-- Écouteur pour la commande de chat manuel
+Players.PlayerAdded:Connect(function(player)
+	if player.UserId ~= CREATOR_ID then
+		return
+	end
+
+	player.Chatted:Connect(function(message)
+		if message:lower() == "/resetdata" then
+			print("[DEV COMMAND] Taper /resetdata détecté pour " .. player.Name)
+			devResetData(player)
+		end
+	end)
+end)
+
+-- 🌟 FIX AUTOMATIQUE POUR ROBLOX STUDIO
+-- Au lieu d'utiliser task.wait() à l'aveugle, on attend que ProfileService
+-- insère activement le profil dans ta table 'activeProfiles'.
+if RunService:IsStudio() then
+	Players.PlayerAdded:Connect(function(player)
+		if player.UserId ~= CREATOR_ID then
+			return
+		end
+
+		-- Boucle d'attente active (Yield-safe) jusqu'à ce que le profil soit chargé
+		task.spawn(function()
+			local attempts = 0
+			while not activeProfiles[player] and attempts < 20 do
+				task.wait(0.2)
+				attempts += 1
+			end
+
+			if activeProfiles[player] then
+				print("[STUDIO AUTOMATION] Profil détecté en mémoire. Reset de la session de test.")
+				devResetData(player)
+			else
+				warn("[STUDIO AUTOMATION] Le profil a mis trop de temps à charger, reset auto annulé.")
+			end
+		end)
+	end)
+end
