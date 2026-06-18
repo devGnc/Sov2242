@@ -15,3 +15,8 @@ rojo serve
 ```
 
 For more help, check out [the Rojo documentation](https://rojo.space/docs).
+
+## Terre désolée
+
+La Terre désolée est téléportée vers une autre place Roblox via `src/shared/PlaceConfig.luau`.
+Renseigne `MainPlaceId` pour la Base/Nid et `TerreDesoleePlaceId` pour la Terre désolée, puis utilise les portails des deux côtés.

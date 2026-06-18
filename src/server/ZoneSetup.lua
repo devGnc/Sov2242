@@ -166,7 +166,15 @@ function ZoneSetup.GetZoneFolder(zoneName: string): Folder?
 	return zonesRoot:FindFirstChild(zoneName)
 end
 
-function ZoneSetup.Run()
+function ZoneSetup.Run(activeZones: { [string]: boolean }?)
+	local function shouldCreateZone(zoneName: string): boolean
+		if not activeZones then
+			return true
+		end
+
+		return activeZones[zoneName] == true
+	end
+
 	local zonesRoot = Workspace:FindFirstChild("Zones")
 	if not zonesRoot then
 		zonesRoot = Instance.new("Folder")
@@ -175,6 +183,10 @@ function ZoneSetup.Run()
 	end
 
 	for _, zoneData in ZONES do
+		if not shouldCreateZone(zoneData.Name) then
+			continue
+		end
+
 		local folder = ensureFolder(zonesRoot, zoneData.Name)
 		local ground = ensureGround(folder, zoneData)
 		ensureLabel(ground, zoneData.DisplayName)
