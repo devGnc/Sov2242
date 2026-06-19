@@ -1,77 +1,56 @@
 {
-  "name": "Sov2242",
+  "name": "SOV2242",
   "tree": {
     "$className": "DataModel",
 
-    "ReplicatedStorage": {
-      "Shared": {
-        "$path": "src/shared"
-      },
-      "Packages": {
-        "$path": "Packages"
-      }
-    },
-
     "ServerScriptService": {
-      "Server": {
-        "$path": "src/server"
+      "$className": "ServerScriptService",
+      "Scripts": {
+        "$path": "src/server",
+        "CombatService": {
+          "$path": "src/server/CombatService.luau"
+        },
+        "ZoneSetup": {
+          "$path": "src/server/ZoneSetup.luau"
+        }
       },
       "ServerPackages": {
         "$path": "ServerPackages"
       }
     },
 
-    "StarterPlayer": {
-      "StarterPlayerScripts": {
-        "Client": {
-          "$path": "src/client"
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$className": "Folder",
+        "PlaceConfig": {
+          "$path": "src/shared/PlaceConfig.luau"
+        },
+        "RemoteEvents": {
+          "$path": "src/shared/RemoteEvents.luau"
+        },
+        "LootBagModule": {
+          "$path": "src/shared/LootBagModule.luau"
+        },
+        "Hello": {
+          "$path": "src/shared/Hello.luau"
         }
+      },
+      "Packages": {
+        "$path": "Packages"
       }
     },
 
-    "Workspace": {
-      "$properties": {
-        "FilteringEnabled": true
-      },
-      "Baseplate": {
-        "$className": "Part",
-        "$properties": {
-          "Anchored": true,
-          "Color": [
-            0.38823,
-            0.37254,
-            0.38823
-          ],
-          "Locked": true,
-          "Position": [
-            0,
-            -10,
-            0
-          ],
-          "Size": [
-            512,
-            20,
-            512
-          ]
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "ClientInit": {
+          "$path": "src/client"
+        },
+        "HealthBarClient": {
+          "$path": "src/client/HealthBarClient.luau"
         }
-      }
-    },
-    "Lighting": {
-      "$properties": {
-        "Ambient": [
-          0,
-          0,
-          0
-        ],
-        "Brightness": 2,
-        "GlobalShadows": true,
-        "Outlines": false,
-        "Technology": "Voxel"
-      }
-    },
-    "SoundService": {
-      "$properties": {
-        "RespectFilteringEnabled": true
       }
     }
   }

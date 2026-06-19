@@ -201,7 +201,12 @@ local function teleportPlayerBackToMainPlace(player: Player, destinationSpawnZon
 		if isStudio then
 			local fallbackSpawn = ZoneSetup.GetSpawnPoint(destinationSpawnZone)
 			if moveCharacterToSpawn(player, fallbackSpawn) then
-				warn(("Fallback Studio actif : %s a été déplacé localement vers %s."):format(player.Name, destinationSpawnZone))
+				warn(
+					("Fallback Studio actif : %s a été déplacé localement vers %s."):format(
+						player.Name,
+						destinationSpawnZone
+					)
+				)
 			end
 		end
 	end
@@ -246,7 +251,11 @@ local function teleportPlayerToPlace(player: Player, destinationPlaceId: number,
 		if RunService:IsStudio() then
 			local fallbackSpawn = ZoneSetup.GetSpawnPoint(ZONE_TERRE_DESOLEE)
 			if moveCharacterToSpawn(player, fallbackSpawn) then
-				warn(("Fallback Studio actif : %s a été déplacé localement vers la Terre désolée de test."):format(player.Name))
+				warn(
+					("Fallback Studio actif : %s a été déplacé localement vers la Terre désolée de test."):format(
+						player.Name
+					)
+				)
 			end
 		end
 	end
@@ -279,7 +288,12 @@ local function ensureTerreDesoleeTeleporter(sourceZoneName: string, padName: str
 	end)
 end
 
-local function ensureReturnTeleporter(sourceZoneName: string, padName: string, offset: Vector3, destinationSpawnZone: string)
+local function ensureReturnTeleporter(
+	sourceZoneName: string,
+	padName: string,
+	offset: Vector3,
+	destinationSpawnZone: string
+)
 	local sourceFolder = ZoneSetup.GetZoneFolder(sourceZoneName)
 	if not sourceFolder then
 		warn(("ZoneSetup n'a pas encore créé %s, le téléporteur ne peut pas être placé."):format(sourceZoneName))
@@ -355,7 +369,8 @@ local function spawnPlayer(player: Player)
 	end
 
 	local overrideZone = pendingSpawnZone[player]
-	local targetSpawn = overrideZone and ZoneSetup.GetSpawnPoint(overrideZone) or getSpawnFromFaction(profile.Data.Faction)
+	local targetSpawn = overrideZone and ZoneSetup.GetSpawnPoint(overrideZone)
+		or getSpawnFromFaction(profile.Data.Faction)
 	if not targetSpawn then
 		return
 	end
@@ -560,3 +575,25 @@ if RunService:IsStudio() then
 		end)
 	end)
 end
+local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
+
+RemoteEvents.RequestRespawn.Event:Connect(function(player: Player)
+	if player and player.Parent == Players then
+		spawnPlayer(player)
+	end
+end)
+-- Code de test temporaire à mettre à la fin de init.server.luau
+local CombatService = require(game:GetService("ServerScriptService").Scripts.CombatService)
+
+game:GetService("Players").PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function(character)
+		-- On attend 3 secondes après ton apparition et on te simule du loot !
+		task.wait(3)
+		print("Simulation : Ajout de loot volatile pour " .. player.Name)
+		CombatService.AddSessionLoot(player, "Tissus mutés", 5)
+
+		-- On te retire de la vie pour voir la barre descendre
+		local humanoid = character:WaitForChild("Humanoid")
+		humanoid.Health = 40
+	end)
+end)
