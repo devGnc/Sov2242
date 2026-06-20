@@ -575,25 +575,13 @@ if RunService:IsStudio() then
 		end)
 	end)
 end
-local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
+-- ─── Branchement CombatService → spawnPlayer ──────────────────────────────────
+-- CombatService expose son BindableEvent RequestRespawn (server-only).
+-- On l'écoute ici pour déclencher spawnPlayer() au bon endroit.
+local CombatService = require(game:GetService("ServerScriptService").Scripts.CombatService)
 
-RemoteEvents.RequestRespawn.Event:Connect(function(player: Player)
+CombatService.RequestRespawn.Event:Connect(function(player: Player)
 	if player and player.Parent == Players then
 		spawnPlayer(player)
 	end
-end)
--- Code de test temporaire à mettre à la fin de init.server.luau
-local CombatService = require(game:GetService("ServerScriptService").Scripts.CombatService)
-
-game:GetService("Players").PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(function(character)
-		-- On attend 3 secondes après ton apparition et on te simule du loot !
-		task.wait(3)
-		print("Simulation : Ajout de loot volatile pour " .. player.Name)
-		CombatService.AddSessionLoot(player, "Tissus mutés", 5)
-
-		-- On te retire de la vie pour voir la barre descendre
-		local humanoid = character:WaitForChild("Humanoid")
-		humanoid.Health = 40
-	end)
 end)

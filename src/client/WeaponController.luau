@@ -1,67 +1,56 @@
 -- WeaponController.luau
--- Gère les inputs du joueur (Clics de souris) pour déclencher les attaques via le réseau.
+-- Gère les inputs joueur et envoie les actions d'attaque au serveur.
+-- CORRECTION : config importée depuis WeaponConfig partagé (plus de duplication).
 
-local Players = game:GetService("Players")
+local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
+local UserInputService  = game:GetService("UserInputService")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
+local WeaponConfig = require(ReplicatedStorage.Shared.WeaponConfig)
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
--- Arme actuellement équipée (Simulée pour les tests)
--- Change par "Fusil", "Pistolet", ou "Couteau" pour tester les différents modes !
+-- Arme équipée (simulée en attendant le système d'inventaire — Bloc 3)
+-- Remplace par "Pistolet" ou "Couteau" pour tester les autres modes.
 local currentWeapon = "Fusil"
 
-local COOLDOWNS = {
-	["Fusil"] = 0.5,
-	["Pistolet"] = 0.3,
-	["Couteau"] = 0.7,
-}
 local lastAttackTime = 0
 
 local function onActivated()
 	local character = player.Character
-	if not character or not character:FindFirstChild("Humanoid") then
-		return
-	end
-	if character.Humanoid.Health <= 0 then
-		return
-	end -- Morts interdits de tirer
+	if not character then return end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return end
 
+	local config = WeaponConfig[currentWeapon]
+	if not config then return end
+
+	-- Cooldown local (confort : évite les envois réseau inutiles)
 	local now = os.clock()
-	local cooldown = COOLDOWNS[currentWeapon] or 0.5
-	if now - lastAttackTime < cooldown then
-		return
-	end -- Cooldown local actif
+	if now - lastAttackTime < config.Cooldown then return end
 	lastAttackTime = now
 
-	if currentWeapon == "Couteau" then
-		-- Corps à corps : On notifie simplement le serveur
-		RemoteEvents.WeaponMelee:FireServer({
-			weaponName = currentWeapon,
-		})
+	if config.Type == "Melee" then
+		RemoteEvents.WeaponMelee:FireServer({ weaponName = currentWeapon })
 	else
-		-- Arme à feu : On calcule la direction vers laquelle regarde la souris/caméra
 		local mouseLocation = UserInputService:GetMouseLocation()
-		local unitRay = camera:ScreenPointToRay(mouseLocation.X, mouseLocation.Y)
-
+		local unitRay       = camera:ScreenPointToRay(mouseLocation.X, mouseLocation.Y)
 		RemoteEvents.WeaponFire:FireServer({
-			origin = unitRay.Origin,
+			origin    = unitRay.Origin,
 			direction = unitRay.Direction,
 			weaponName = currentWeapon,
 		})
 	end
 end
 
--- Écoute le clic gauche de la souris ou la gâchette manette
-UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
-	if gameProcessedEvent then
-		return
-	end -- Ignore si on clique sur un bouton UI ou le Chat
-
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Gamepad1 then
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if
+		input.UserInputType == Enum.UserInputType.MouseButton1 or
+		input.UserInputType == Enum.UserInputType.Gamepad1
+	then
 		onActivated()
 	end
 end)
