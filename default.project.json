@@ -6,16 +6,7 @@
     "ServerScriptService": {
       "$className": "ServerScriptService",
       "Scripts": {
-        "$path": "src/server",
-        "CombatService": {
-          "$path": "src/server/CombatService.luau"
-        },
-        "WeaponService": {
-          "$path": "src/server/WeaponService.luau"
-        },
-        "ZoneSetup": {
-          "$path": "src/server/ZoneSetup.luau"
-        }
+        "$path": "src/server"
       },
       "ServerPackages": {
         "$path": "ServerPackages"
@@ -26,18 +17,7 @@
       "$className": "ReplicatedStorage",
       "Shared": {
         "$className": "Folder",
-        "PlaceConfig": {
-          "$path": "src/shared/PlaceConfig.luau"
-        },
-        "RemoteEvents": {
-          "$path": "src/shared/RemoteEvents.luau"
-        },
-        "LootBagModule": {
-          "$path": "src/shared/LootBagModule.luau"
-        },
-        "Hello": {
-          "$path": "src/shared/Hello.luau"
-        }
+        "$path": "src/shared"
       },
       "Packages": {
         "$path": "Packages"
@@ -50,12 +30,6 @@
         "$className": "StarterPlayerScripts",
         "ClientInit": {
           "$path": "src/client"
-        },
-        "HealthBarClient": {
-          "$path": "src/client/HealthBarClient.luau"
-        },
-        "WeaponController": {
-          "$path": "src/client/WeaponController.luau"
         }
       }
     }
