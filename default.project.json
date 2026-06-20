@@ -10,6 +10,9 @@
         "CombatService": {
           "$path": "src/server/CombatService.luau"
         },
+        "WeaponService": {
+          "$path": "src/server/WeaponService.luau"
+        },
         "ZoneSetup": {
           "$path": "src/server/ZoneSetup.luau"
         }
@@ -50,6 +53,9 @@
         },
         "HealthBarClient": {
           "$path": "src/client/HealthBarClient.luau"
+        },
+        "WeaponController": {
+          "$path": "src/client/WeaponController.luau"
         }
       }
     }
