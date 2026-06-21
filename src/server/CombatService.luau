@@ -2,22 +2,22 @@
 -- Bloc 1 : PV, mort, sac de loot volatile, réapparition au hub.
 -- Expose AddSessionLoot() pour l'IA Mutants (Bloc 2).
 
-local Players             = game:GetService("Players")
-local ReplicatedStorage   = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local RemoteEvents  = require(ReplicatedStorage.Shared.RemoteEvents)
+local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
 local LootBagModule = require(ReplicatedStorage.Shared.LootBagModule)
 
 -- ─── Constantes ───────────────────────────────────────────────────────────────
-local MAX_HEALTH    = 100
-local RESPAWN_DELAY = 2   -- secondes avant réapparition
+local MAX_HEALTH = 100
+local RESPAWN_DELAY = 2 -- secondes avant réapparition
 
 -- ─── BindableEvent interne (server-only) ──────────────────────────────────────
 -- Créé ici, écouté dans init.server.luau via CombatService.RequestRespawn.
 -- Un BindableEvent doit rester dans ServerScriptService/Scripts, jamais dans
 -- ReplicatedStorage.
 local RequestRespawn = Instance.new("BindableEvent")
-RequestRespawn.Name  = "RequestRespawn"
+RequestRespawn.Name = "RequestRespawn"
 
 -- ─── Loot volatile de session ─────────────────────────────────────────────────
 -- { [Player]: { [itemName]: quantity } }
@@ -32,6 +32,9 @@ function CombatService.AddSessionLoot(player: Player, itemName: string, quantity
 		sessionLoot[player] = {}
 	end
 	sessionLoot[player][itemName] = (sessionLoot[player][itemName] or 0) + quantity
+
+	-- 🌟 SYNCHRONISATION UI :
+	player:SetAttribute("Loot_" .. itemName, sessionLoot[player][itemName])
 end
 
 -- Exposé pour que LootBagModule puisse créditer le pilleur (Bug 3)
@@ -57,20 +60,26 @@ local function onHealthChanged(player: Player, humanoid: Humanoid)
 	humanoid.HealthChanged:Connect(function(newHealth: number)
 		RemoteEvents.UpdateHealth:FireClient(player, {
 			current = math.floor(newHealth),
-			max     = math.floor(humanoid.MaxHealth),
+			max = math.floor(humanoid.MaxHealth),
 		})
 	end)
 end
 
 -- ─── Mort ─────────────────────────────────────────────────────────────────────
 local function onCharacterDied(player: Player)
-	-- Notifier le client (écran de mort)
-	RemoteEvents.PlayerDied:FireClient(player, { killerFaction = nil })
-
 	-- Récupérer et vider le loot de session
 	local loot = popSessionLoot(player)
-
 	local hasLoot = next(loot) ~= nil
+
+	-- 🌟 CORRECTION : Vérifie s'il y a du loot avant d'afficher le message de perte
+	local lootText = if hasLoot then "Sac lâché — items perdus si non pillés sous 5 min" else nil
+
+	-- Notifier le client (écran de mort + info loot)
+	RemoteEvents.PlayerDied:FireClient(player, {
+		killerFaction = nil,
+		lootDescription = lootText,
+	})
+
 	if hasLoot then
 		task.wait(0.1)
 		LootBagModule.Spawn(player, loot)
@@ -79,7 +88,7 @@ local function onCharacterDied(player: Player)
 	-- Réapparition différée
 	task.delay(RESPAWN_DELAY, function()
 		if player.Parent == Players then
-			RequestRespawn:Fire(player)
+			CombatService.RequestRespawn:Fire(player)
 		end
 	end)
 end
@@ -95,11 +104,11 @@ local function onCharacterAdded(player: Player, character: Model)
 	end
 
 	humanoid.MaxHealth = MAX_HEALTH
-	humanoid.Health    = MAX_HEALTH
+	humanoid.Health = MAX_HEALTH
 
 	RemoteEvents.UpdateHealth:FireClient(player, {
 		current = MAX_HEALTH,
-		max     = MAX_HEALTH,
+		max = MAX_HEALTH,
 	})
 
 	onHealthChanged(player, humanoid)
@@ -126,6 +135,17 @@ end
 
 Players.PlayerRemoving:Connect(function(player: Player)
 	sessionLoot[player] = nil
+end)
+-- 🌟 AJOUT : Écoute l'événement du LootBagModule pour donner les récompenses sans boucle cyclique
+LootBagModule.LootBagPilled.Event:Connect(function(looter: Player, lootTable: { [string]: number })
+	if not looter or not lootTable then
+		return
+	end
+
+	for itemName, qty in lootTable do
+		CombatService.AddSessionLoot(looter, itemName, qty)
+		print(("[CombatService] %s reçoit %s x%d de son pillage"):format(looter.Name, itemName, qty))
+	end
 end)
 
 return CombatService

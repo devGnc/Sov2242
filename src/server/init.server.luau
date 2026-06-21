@@ -447,6 +447,14 @@ if isStudio or isTerreDesoleePlace then
 	ensureReturnTeleporter(ZONE_TERRE_DESOLEE, "ReturnToNid", Vector3.new(18, 1, 12), ZONE_NID)
 end
 
+-- 🌟 AJOUT : Écouteur pour l'UI FactionChoiceClient
+local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
+RemoteEvents.SetFaction.OnServerEvent:Connect(function(player: Player, data)
+	if type(data) == "table" and data.faction then
+		setFaction(player, data.faction)
+	end
+end)
+
 local function loadPlayerProfile(player: Player)
 	local profile = PROFILE_STORE:LoadProfileAsync(("Player_%d"):format(player.UserId), "ForceLoad")
 	if not profile then
