@@ -1,9 +1,6 @@
 -- RemoteEvents.luau
 -- Module centralisé qui crée (côté serveur) ou récupère (côté client)
 -- tous les RemoteEvents du jeu.
--- NOTE : RequestRespawn (BindableEvent serveur↔serveur) est géré directement
--- dans init.server.luau et n'a pas sa place ici (ReplicatedStorage est
--- inaccessible aux scripts serveur-à-serveur via BindableEvent).
 
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -48,6 +45,7 @@ local UpdateHealth = getOrCreate(folder, "UpdateHealth", "RemoteEvent") -- { cur
 local PlayerDied = getOrCreate(folder, "PlayerDied", "RemoteEvent") -- { killerFaction? }
 local LootSpawned = getOrCreate(folder, "LootSpawned", "RemoteEvent") -- { bagId, position, lootCount, ownerId }
 local LootRemoved = getOrCreate(folder, "LootRemoved", "RemoteEvent") -- { bagId }
+local OpenFactionMenu = getOrCreate(folder, "OpenFactionMenu", "RemoteEvent") -- 🌟 AJOUT : Ouvre l'UI de faction
 
 -- Client → Server
 local RequestLoot = getOrCreate(folder, "RequestLoot", "RemoteEvent") -- { bagId }
@@ -60,6 +58,7 @@ return {
 	PlayerDied = PlayerDied :: RemoteEvent,
 	LootSpawned = LootSpawned :: RemoteEvent,
 	LootRemoved = LootRemoved :: RemoteEvent,
+	OpenFactionMenu = OpenFactionMenu :: RemoteEvent, -- 🌟 AJOUT : Exhortation au typage
 	RequestLoot = RequestLoot :: RemoteEvent,
 	WeaponFire = WeaponFire :: RemoteEvent,
 	WeaponMelee = WeaponMelee :: RemoteEvent,

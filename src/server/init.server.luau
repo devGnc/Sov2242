@@ -76,72 +76,9 @@ local function ensurePrompt(parent: Instance, name: string, actionText: string, 
 	return prompt
 end
 
-local function ensureRecruiterNpc(): (ProximityPrompt?, ProximityPrompt?)
-	local baseFolder = ZoneSetup.GetZoneFolder(ZONE_BASE)
-	if not baseFolder then
-		warn("ZoneSetup n'a pas encore créé Zone_Base, le recruteur ne peut pas être placé.")
-		return nil, nil
-	end
+-- 🌟 NETTOYAGE : La fonction ensureRecruiterNpc() qui créait le bloc gris a été supprimée d'ici.
 
-	local basePosition = ZoneSetup.GetZonePosition(ZONE_BASE) or Vector3.new(0, 0, 0)
-
-	local recruiter = baseFolder:FindFirstChild("FactionRecruiter")
-	if recruiter and not recruiter:IsA("BasePart") then
-		recruiter:Destroy()
-		recruiter = nil
-	end
-
-	if not recruiter then
-		local recruiterPart = Instance.new("Part")
-		recruiterPart.Name = "FactionRecruiter"
-		recruiterPart.Size = Vector3.new(3, 6, 3)
-		recruiterPart.CFrame = CFrame.new(basePosition + Vector3.new(0, 3, -10))
-		recruiterPart.Anchored = true
-		recruiterPart.BrickColor = BrickColor.new("Dark stone grey")
-		recruiterPart.Parent = baseFolder
-		recruiter = recruiterPart
-	end
-
-	-- 🌟 CRÉATION DES ATTACHES VISUELLES POUR LES PROMPTS
-	-- Option 1 : Attache Gauche (Soldier)
-	local leftAnchor = recruiter:FindFirstChild("LeftPromptAnchor")
-	if not leftAnchor then
-		local part = Instance.new("Part")
-		part.Name = "LeftPromptAnchor"
-		part.Size = Vector3.new(1, 1, 1)
-		part.CFrame = recruiter.CFrame * CFrame.new(-2.5, 0, 0) -- Décale de 2.5 studs à gauche
-		part.Transparency = 1
-		part.CanCollide = false
-		part.Anchored = true
-		part.Parent = recruiter
-		leftAnchor = part
-	end
-
-	-- Option 2 : Attache Droite (Outcast)
-	local rightAnchor = recruiter:FindFirstChild("RightPromptAnchor")
-	if not rightAnchor then
-		local part = Instance.new("Part")
-		part.Name = "RightPromptAnchor"
-		part.Size = Vector3.new(1, 1, 1)
-		part.CFrame = recruiter.CFrame * CFrame.new(2.5, 0, 0) -- Décale de 2.5 studs à droite
-		part.Transparency = 1
-		part.CanCollide = false
-		part.Anchored = true
-		part.Parent = recruiter
-		rightAnchor = part
-	end
-
-	-- On met les prompts sur leurs attaches respectives au lieu de les empiler au même endroit
-	local stayPrompt = ensurePrompt(leftAnchor, "StaySoldierPrompt", "Rester Combattant", "Officier de Liaison")
-	local fleePrompt = ensurePrompt(rightAnchor, "FleeOutcastPrompt", "Fuir et devenir Fuyard", "Officier de Liaison")
-
-	return stayPrompt, fleePrompt
-end
-
--- Point de transit en Zone de Test : la recrue n'a pas encore de faction,
--- elle doit interagir ici pour être emmenée à la Base où le choix se fera.
--- Ceci ne change QUE la position physique du joueur, jamais son RespawnLocation :
--- s'il meurt avant d'avoir choisi, il doit réapparaître en Zone de Test, pas à la Base.
+-- Point de transit en Zone de Test
 local function ensureTestToBaseTeleporter()
 	local testFolder = ZoneSetup.GetZoneFolder(ZONE_TEST)
 	if not testFolder then
@@ -292,7 +229,9 @@ local function ensureReturnTeleporter(
 	sourceZoneName: string,
 	padName: string,
 	offset: Vector3,
-	destinationSpawnZone: string
+	destinationSpawnZone: string,
+	actionText: string, -- 🌟 AJOUT
+	objectText: string -- 🌟 AJOUT
 )
 	local sourceFolder = ZoneSetup.GetZoneFolder(sourceZoneName)
 	if not sourceFolder then
@@ -314,7 +253,9 @@ local function ensureReturnTeleporter(
 		pad = padPart
 	end
 
-	local prompt = ensurePrompt(pad, "ReturnToMainPlacePrompt", "Retourner", "Portail de retour")
+	-- 🌟 MODIFICATION : On utilise les textes passés en paramètres ici
+	local prompt = ensurePrompt(pad, "ReturnToMainPlacePrompt", actionText, objectText)
+
 	prompt.Triggered:Connect(function(player: Player)
 		local profile = activeProfiles[player]
 		local allowed = false
@@ -334,7 +275,6 @@ local function ensureReturnTeleporter(
 		teleportPlayerBackToMainPlace(player, destinationSpawnZone, sourceZoneName)
 	end)
 end
-
 local function getSpawnFromFaction(faction: string): SpawnLocation?
 	if faction == FACTION_SOLDIER then
 		return ZoneSetup.GetSpawnPoint(ZONE_BASE)
@@ -344,8 +284,6 @@ local function getSpawnFromFaction(faction: string): SpawnLocation?
 		return ZoneSetup.GetSpawnPoint(ZONE_NID)
 	end
 
-	-- Pas encore de faction (FACTION_NONE) : on est une simple recrue potentielle,
-	-- on apparaît toujours en Zone de Test.
 	return ZoneSetup.GetSpawnPoint(ZONE_TEST)
 end
 
@@ -423,31 +361,37 @@ local function setFaction(player: Player, faction: string)
 	spawnPlayer(player)
 end
 
+-- ─── INITIALISATION MAPS ET TÉLÉPORTEURS ──────────────────────────────────────
 if isStudio or not isTerreDesoleePlace then
-	local stayPrompt, fleePrompt = ensureRecruiterNpc()
+	-- 🌟 Le revoilà ! C'est cette ligne qui avait disparu :
 	ensureTestToBaseTeleporter()
+
+	-- Portails d'aller vers la Terre désolée depuis les Hubs
 	ensureTerreDesoleeTeleporter(ZONE_BASE, "TeleportToTerreDesolee", Vector3.new(18, 1, 0))
 	ensureTerreDesoleeTeleporter(ZONE_NID, "TeleportToTerreDesolee", Vector3.new(18, 1, 0))
-
-	if stayPrompt then
-		stayPrompt.Triggered:Connect(function(player)
-			setFaction(player, FACTION_SOLDIER)
-		end)
-	end
-
-	if fleePrompt then
-		fleePrompt.Triggered:Connect(function(player)
-			setFaction(player, FACTION_OUTCAST)
-		end)
-	end
 end
 
 if isStudio or isTerreDesoleePlace then
-	ensureReturnTeleporter(ZONE_TERRE_DESOLEE, "ReturnToBase", Vector3.new(18, 1, 0), ZONE_BASE)
-	ensureReturnTeleporter(ZONE_TERRE_DESOLEE, "ReturnToNid", Vector3.new(18, 1, 12), ZONE_NID)
+	-- Portails de retour différenciés avec leurs textes uniques
+	ensureReturnTeleporter(
+		ZONE_TERRE_DESOLEE,
+		"ReturnToBase",
+		Vector3.new(18, 1, 0),
+		ZONE_BASE,
+		"Rentrer à La Base",
+		"Portail des Combattants"
+	)
+	ensureReturnTeleporter(
+		ZONE_TERRE_DESOLEE,
+		"ReturnToNid",
+		Vector3.new(18, 1, 12),
+		ZONE_NID,
+		"Rentrer au Nid",
+		"Portail des Fuyards"
+	)
 end
 
--- 🌟 AJOUT : Écouteur pour l'UI FactionChoiceClient
+-- Écouteur pour l'UI FactionChoiceClient
 local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
 RemoteEvents.SetFaction.OnServerEvent:Connect(function(player: Player, data)
 	if type(data) == "table" and data.faction then
@@ -515,10 +459,9 @@ game:BindToClose(function()
 		end
 	end
 end)
--- Ton UserId Roblox pour t'identifier en tant que Créateur
+
 local CREATOR_ID = 11071882653
 
--- Fonction utilitaire interne pour reset un joueur proprement
 local function devResetData(player: Player)
 	local profile = activeProfiles[player]
 	if not profile then
@@ -526,24 +469,19 @@ local function devResetData(player: Player)
 		return
 	end
 
-	-- Réinitialisation directe de la table du profil en mémoire
 	profile.Data.Faction = FACTION_NONE
 	profile.Data.FactionLocked = false
 	profile.Data.CreditsC = 0
 	profile.Data.PiecesP = 0
 	profile.Data.PermanentInventory = {}
 
-	-- Écrasement des attributs pour synchroniser instantanément l'UI cliente
 	player:SetAttribute("Faction", FACTION_NONE)
 	player:SetAttribute("FactionLocked", false)
 
 	print("[DEV SYSTEM] Données réinitialisées avec succès pour " .. player.Name)
-
-	-- Force le joueur à réapparaître instantanément dans la Zone_Test (Spawn par défaut)
 	spawnPlayer(player)
 end
 
--- Écouteur pour la commande de chat manuel
 Players.PlayerAdded:Connect(function(player)
 	if player.UserId ~= CREATOR_ID then
 		return
@@ -557,16 +495,12 @@ Players.PlayerAdded:Connect(function(player)
 	end)
 end)
 
--- 🌟 FIX AUTOMATIQUE POUR ROBLOX STUDIO
--- Au lieu d'utiliser task.wait() à l'aveugle, on attend que ProfileService
--- insère activement le profil dans ta table 'activeProfiles'.
 if RunService:IsStudio() then
 	Players.PlayerAdded:Connect(function(player)
 		if player.UserId ~= CREATOR_ID then
 			return
 		end
 
-		-- Boucle d'attente active (Yield-safe) jusqu'à ce que le profil soit chargé
 		task.spawn(function()
 			local attempts = 0
 			while not activeProfiles[player] and attempts < 20 do
@@ -583,9 +517,7 @@ if RunService:IsStudio() then
 		end)
 	end)
 end
--- ─── Branchement CombatService → spawnPlayer ──────────────────────────────────
--- CombatService expose son BindableEvent RequestRespawn (server-only).
--- On l'écoute ici pour déclencher spawnPlayer() au bon endroit.
+
 local CombatService = require(game:GetService("ServerScriptService").Scripts.CombatService)
 
 CombatService.RequestRespawn.Event:Connect(function(player: Player)

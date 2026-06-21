@@ -1,11 +1,12 @@
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Importation centrale des RemoteEvents
+local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
 
 local ZoneSetup = {}
 
--- Plan de calage des zones : volontairement très espacées pour qu'elles ne
--- se chevauchent jamais, même une fois que les vraies maps seront construites
--- par-dessus ces plateformes. Ajuste les tailles/positions ici quand tu veux,
--- le script ne fait que poser le décor, jamais le détruire si tu construis déjà dessus.
+-- Plan de calage des zones
 local ZONES = {
 	{
 		Name = "Zone_Base",
@@ -53,8 +54,6 @@ local function ensureFolder(parent: Instance, name: string): Folder
 end
 
 local function ensureGround(folder: Folder, zoneData): BasePart
-	-- Si le sol existe déjà (donc si tu as commencé à construire dessus),
-	-- on ne touche plus à sa position ni à sa taille.
 	local existing = folder:FindFirstChild("Ground")
 	if existing and existing:IsA("BasePart") then
 		return existing
@@ -101,9 +100,6 @@ local function ensureLabel(ground: BasePart, text: string)
 end
 
 local function ensureSpawnPoint(folder: Folder, zoneData): SpawnLocation
-	-- Le point de TP propre à la zone. Une fois créé, sa position n'est plus
-	-- jamais réécrite, donc tu peux le déplacer à la main dans Studio sans
-	-- craindre qu'il revienne à sa position d'origine.
 	local existing = folder:FindFirstChild("Spawn")
 	if existing and existing:IsA("SpawnLocation") then
 		return existing
@@ -126,7 +122,80 @@ local function ensureSpawnPoint(folder: Folder, zoneData): SpawnLocation
 	return spawn
 end
 
--- Pratique pour positionner d'autres objets relatifs à une zone (PNJ, téléporteurs...).
+-- 🌟 GÉNERATION ET CONNECTION DU PNJ POUR LA FACTION
+local function ensureFactionNPC(folder: Folder, zoneData)
+	-- On crée le PNJ uniquement si on est dans le Hub principal (Zone_Base)
+	if zoneData.Name ~= "Zone_Base" then
+		return
+	end
+
+	local existing = folder:FindFirstChild("OfficierLiaison")
+	if existing then
+		return
+	end
+
+	-- Structure physique basique du PNJ
+	local npc = Instance.new("Model")
+	npc.Name = "OfficierLiaison"
+	npc.Parent = folder
+
+	local root = Instance.new("Part")
+	root.Name = "HumanoidRootPart"
+	root.Size = Vector3.new(2, 2, 2)
+	root.CFrame = CFrame.new(zoneData.Position + Vector3.new(0, 3, 10)) -- Posé un peu devant le spawn
+	root.Anchored = true
+	root.CanCollide = true
+	root.Color = Color3.fromRGB(240, 240, 240)
+	root.Parent = npc
+
+	npc.PrimaryPart = root
+
+	local humanoid = Instance.new("Humanoid")
+	humanoid.Parent = npc
+
+	-- Ajout d'un titre au-dessus de sa tête
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.new(0, 200, 0, 50)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Parent = root
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = Color3.fromRGB(255, 235, 100)
+	label.TextStrokeTransparency = 0
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 14
+	label.Text = "[NPC] Officier de Liaison"
+	label.Parent = billboard
+
+	-- Bouton d'interaction ProximityPrompt [E]
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "FactionPrompt"
+	prompt.ObjectText = "Officier de Liaison"
+	prompt.ActionText = "Choisir une faction d'aptitude"
+	prompt.HoldDuration = 0.5
+	prompt.MaxActivationDistance = 12
+	prompt.Parent = root
+
+	-- ─── L'ÉCOUTEUR DE L'ÉVÉNEMENT (L'Étape 2 Précise) ────────────────────────
+	prompt.Triggered:Connect(function(player)
+		local locked = player:GetAttribute("FactionLocked")
+		local currentFaction = player:GetAttribute("Faction") or "None"
+
+		-- On n'autorise l'ouverture que si le joueur n'a pas encore validé de camp définitif
+		if not locked or currentFaction == "None" or currentFaction == "" then
+			-- 🌟 On envoie l'ordre au client d'ouvrir son UI complète et interactive !
+			RemoteEvents.OpenFactionMenu:FireClient(player)
+		else
+			-- Notification console serveur si le profil est déjà bloqué
+			print("[INFO SERVEUR] " .. player.Name .. " a déjà validé sa faction : " .. tostring(currentFaction))
+		end
+	end)
+end
+
+-- Pratique pour positionner d'autres objets relatifs à une zone
 function ZoneSetup.GetZonePosition(zoneName: string): Vector3?
 	for _, zoneData in ZONES do
 		if zoneData.Name == zoneName then
@@ -136,7 +205,7 @@ function ZoneSetup.GetZonePosition(zoneName: string): Vector3?
 	return nil
 end
 
--- Retourne le SpawnLocation propre à une zone, à utiliser avec player.RespawnLocation.
+-- Retourne le SpawnLocation propre à une zone
 function ZoneSetup.GetSpawnPoint(zoneName: string): SpawnLocation?
 	local zonesRoot = Workspace:FindFirstChild("Zones")
 	if not zonesRoot then
@@ -156,8 +225,7 @@ function ZoneSetup.GetSpawnPoint(zoneName: string): SpawnLocation?
 	return nil
 end
 
--- Retourne le dossier d'une zone (Workspace.Zones.<ZoneName>), pour y parenter
--- d'autres objets propres à cette zone (PNJ, téléporteurs, décor...).
+-- Retourne le dossier d'une zone
 function ZoneSetup.GetZoneFolder(zoneName: string): Folder?
 	local zonesRoot = Workspace:FindFirstChild("Zones")
 	if not zonesRoot then
@@ -191,6 +259,9 @@ function ZoneSetup.Run(activeZones: { [string]: boolean }?)
 		local ground = ensureGround(folder, zoneData)
 		ensureLabel(ground, zoneData.DisplayName)
 		ensureSpawnPoint(folder, zoneData)
+
+		-- Générer le PNJ interactif au déploiement de la zone
+		ensureFactionNPC(folder, zoneData)
 	end
 end
 

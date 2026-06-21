@@ -1,13 +1,14 @@
--- init.client.luau
--- Point d'entrée client : charge tous les modules UI dans l'ordre.
--- Note : avec $path sur src/client, ce script devient StarterPlayerScripts lui-même.
--- Les autres fichiers du dossier sont des enfants directs (script.X).
-
+-- src/client/init.client.luau
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
 
--- Attendre que le dossier Shared soit prêt
-ReplicatedStorage:WaitForChild("Shared", 15)
-
+-- Chargement de la barre de vie et du HUD (S'exécute normalement)
 require(script.HealthBarClient)
-require(script.FactionChoiceClient)
-require(script.WeaponController)
+
+-- Importation du module de choix de faction
+local FactionChoiceClient = require(script.FactionChoiceClient)
+
+-- 🌟 Écoute l'ordre du PNJ envoyé par ZoneSetup
+RemoteEvents.OpenFactionMenu.OnClientEvent:Connect(function()
+	FactionChoiceClient.Open()
+end)
