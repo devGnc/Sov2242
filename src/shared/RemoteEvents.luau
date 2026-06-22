@@ -46,6 +46,7 @@ local PlayerDied = getOrCreate(folder, "PlayerDied", "RemoteEvent") -- { killerF
 local LootSpawned = getOrCreate(folder, "LootSpawned", "RemoteEvent") -- { bagId, position, lootCount, ownerId }
 local LootRemoved = getOrCreate(folder, "LootRemoved", "RemoteEvent") -- { bagId }
 local OpenFactionMenu = getOrCreate(folder, "OpenFactionMenu", "RemoteEvent") -- 🌟 AJOUT : Ouvre l'UI de faction
+local MutantDied = getOrCreate(folder, "MutantDied", "RemoteEvent") -- 🌟 AJOUT MUTANT
 
 -- Client → Server
 local RequestLoot = getOrCreate(folder, "RequestLoot", "RemoteEvent") -- { bagId }
@@ -58,7 +59,8 @@ return {
 	PlayerDied = PlayerDied :: RemoteEvent,
 	LootSpawned = LootSpawned :: RemoteEvent,
 	LootRemoved = LootRemoved :: RemoteEvent,
-	OpenFactionMenu = OpenFactionMenu :: RemoteEvent, -- 🌟 AJOUT : Exhortation au typage
+	OpenFactionMenu = OpenFactionMenu :: RemoteEvent,
+	MutantDied = MutantDied :: RemoteEvent, -- 🌟 FIX : Exportation indispensable pour l'étape 3
 	RequestLoot = RequestLoot :: RemoteEvent,
 	WeaponFire = WeaponFire :: RemoteEvent,
 	WeaponMelee = WeaponMelee :: RemoteEvent,

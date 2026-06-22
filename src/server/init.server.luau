@@ -5,6 +5,7 @@ local TeleportService = game:GetService("TeleportService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local MutantService = require(script.MutantService)
 local ProfileService = require(ServerScriptService.ServerPackages.profileservice)
 local ZoneSetup = require(script.ZoneSetup)
 local PlaceConfig = require(ReplicatedStorage.Shared.PlaceConfig)
@@ -51,6 +52,7 @@ else
 end
 
 ZoneSetup.Run(zoneDefinitions)
+MutantService.InitSpawning()
 
 local function ensurePrompt(parent: Instance, name: string, actionText: string, objectText: string): ProximityPrompt
 	local existing = parent:FindFirstChild(name)
