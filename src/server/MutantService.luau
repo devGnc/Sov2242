@@ -1,84 +1,166 @@
+-- MutantService.luau
+-- Bloc 2 : IA Runner (Rôdeur) + Tank (Alpha) + loot mutants.
+
 local ServerStorage = game:GetService("ServerStorage")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local PathfindingService = game:GetService("PathfindingService")
 
 local ZoneSetup = require(script.Parent.ZoneSetup)
 local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
 
+-- CombatService chargé en lazy pour éviter les dépendances circulaires
+local CombatService = nil
+local function getCombatService()
+	if not CombatService then
+		CombatService = require(game:GetService("ServerScriptService").Scripts.CombatService)
+	end
+	return CombatService
+end
+
 local MutantService = {}
 
--- ⚙️ CONFIGURATION DE L'IA RUNNER
+-- ─── ZONE ────────────────────────────────────────────────────────────────────
 local SPAWN_ZONE_NAME = "Zone_TerreDesolee"
-local MAX_RUNNERS = 8 -- Nombre maximum de Runners simultanés sur la map
-local DETECTION_RADIUS = 35 -- Distance de détection d'un joueur (en studs)
-local MEUTE_RADIUS = 45 -- Distance pour alerter les autres mutants
-local ATTACK_RANGE = 4 -- Distance pour mordre le joueur
-local ATTACK_DAMAGE = 15 -- Dégâts par coup
-local ATTACK_COOLDOWN = 1.2 -- Temps entre deux attaques
 
--- 🌟 CRÉATION DE L'OBJET ANIMATION D'ATTAQUE GLOBAL
-local attackAnimation = Instance.new("Animation")
-attackAnimation.AnimationId = "rbxassetid://913384386" -- Coup de poing / Attaque R15
+-- ─── CONFIG RUNNER ───────────────────────────────────────────────────────────
+local MAX_RUNNERS = 8
+local RUNNER_DETECTION = 35
+local RUNNER_MEUTE = 45
+local RUNNER_ATTACK_RANGE = 4
+local RUNNER_DAMAGE = 15
+local RUNNER_COOLDOWN = 1.2
+local RUNNER_SPEED = 15
 
-local activeRunners = {}
+-- ─── CONFIG TANK ─────────────────────────────────────────────────────────────
+local MAX_TANKS = 2
+local TANK_DETECTION = 50 -- aggro de zone large
+local TANK_ATTACK_RANGE = 6
+local TANK_DAMAGE = 30
+local TANK_COOLDOWN = 2.0
+local TANK_SPEED_WALK = 10
+local TANK_SPEED_CHARGE = 26 -- vitesse de charge (x2.6)
+local TANK_ARMOR = 0.80 -- 80% réduction des dégâts
+local TANK_AGGRO_RADIUS = 80 -- alerte tous les mutants dans ce rayon
+
+-- ─── LOOT TABLES ─────────────────────────────────────────────────────────────
+-- { itemName, minQty, maxQty, chance (0-1) }
+local RUNNER_LOOT = {
+	{ item = "Tissu muté", min = 1, max = 3, chance = 0.80 },
+	{ item = "Composant", min = 1, max = 2, chance = 0.50 },
+}
+
+local TANK_LOOT = {
+	{ item = "Tissu muté", min = 2, max = 5, chance = 1.00 },
+	{ item = "Composant", min = 2, max = 4, chance = 0.90 },
+	{ item = "Tissu muté rare", min = 1, max = 2, chance = 0.60 },
+	{ item = "Plaque blindée", min = 1, max = 1, chance = 0.35 },
+}
+
+local function rollLoot(lootTable: { { item: string, min: number, max: number, chance: number } })
+	local result: { [string]: number } = {}
+	for _, entry in lootTable do
+		if math.random() <= entry.chance then
+			local qty = math.random(entry.min, entry.max)
+			result[entry.item] = (result[entry.item] or 0) + qty
+		end
+	end
+	return result
+end
+
+-- ─── ÉTAT ────────────────────────────────────────────────────────────────────
+local activeRunners: { [Model]: { State: string, Target: Model?, NextAttackTime: number, PatrolTarget: Vector3 } } = {}
+local activeTanks: { [Model]: { State: string, Target: Model?, NextAttackTime: number, PatrolTarget: Vector3, IsCharging: boolean } } =
+	{}
+
 local templates = ServerStorage:WaitForChild("Monsters")
 local runnerTemplate = templates:WaitForChild("MutantRunner")
+local tankTemplate = templates:FindFirstChild("MutantTank") -- peut être nil si pas encore créé en Studio
 
--- Trouver le joueur le plus proche
-local function findNearestTarget(runnerRoot: BasePart)
-	local nearestPlayer = nil
-	local shortestDistance = DETECTION_RADIUS
+-- ─── ANIMATIONS PARTAGÉES ────────────────────────────────────────────────────
+local attackAnimation = Instance.new("Animation")
+attackAnimation.AnimationId = "rbxassetid://913384386"
 
+-- ─── UTILITAIRES ─────────────────────────────────────────────────────────────
+local function getRandomPatrolPoint()
+	local zonePos = ZoneSetup.GetZonePosition(SPAWN_ZONE_NAME) or Vector3.new(6000, 0, 0)
+	return Vector3.new(zonePos.X + math.random(-250, 250), zonePos.Y + 3, zonePos.Z + math.random(-250, 250))
+end
+
+local function findNearestTarget(rootPart: BasePart, detectionRadius: number)
+	local nearest = nil
+	local shortest = detectionRadius
 	for _, player in Players:GetPlayers() do
-		local character = player.Character
-		if not character then
+		local char = player.Character
+		if not char then
 			continue
 		end
-
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		local rootPart = character:FindFirstChild("HumanoidRootPart")
-
-		if humanoid and humanoid.Health > 0 and rootPart then
-			local distance = (runnerRoot.Position - rootPart.Position).Magnitude
-			if distance < shortestDistance then
-				shortestDistance = distance
-				nearestPlayer = character
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		local root = char:FindFirstChild("HumanoidRootPart")
+		if hum and hum.Health > 0 and root then
+			local dist = (rootPart.Position - root.Position).Magnitude
+			if dist < shortest then
+				shortest = dist
+				nearest = char
 			end
 		end
 	end
-	return nearestPlayer, shortestDistance
+	return nearest, shortest
 end
 
--- Système de meute
-local function alertMeute(fleeingPlayerCharacter, instigatorRunner)
+local function applyArmorDamage(humanoid: Humanoid, raw: number, armor: number)
+	local actual = math.max(1, math.floor(raw * (1 - armor)))
+	humanoid:TakeDamage(actual)
+end
+
+-- ─── LOOT DROP ───────────────────────────────────────────────────────────────
+local function dropLootToNearestPlayer(rootPos: Vector3, lootTable)
+	-- On cherche le joueur le plus proche au moment de la mort pour lui attribuer le loot
+	local nearest = nil
+	local shortest = 9999
+	for _, player in Players:GetPlayers() do
+		local char = player.Character
+		if not char then
+			continue
+		end
+		local root = char:FindFirstChild("HumanoidRootPart")
+		if root then
+			local dist = (rootPos - root.Position).Magnitude
+			if dist < shortest then
+				shortest = dist
+				nearest = player
+			end
+		end
+	end
+
+	if nearest then
+		local loot = rollLoot(lootTable)
+		local cs = getCombatService()
+		for itemName, qty in loot do
+			cs.AddSessionLoot(nearest, itemName, qty)
+			print(("[MutantService] %s reçoit %s x%d"):format(nearest.Name, itemName, qty))
+		end
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- RUNNER BEHAVIOR
+-- ═══════════════════════════════════════════════════════════════════════════
+local function alertMeuteRunners(targetChar: Model, instigator: Model)
 	for runner, data in activeRunners do
-		if runner == instigatorRunner then
+		if runner == instigator then
 			continue
 		end
 		if data.State == "Patrol" then
 			local root = runner:FindFirstChild("HumanoidRootPart")
-			local instigatorRoot = instigatorRunner:FindFirstChild("HumanoidRootPart")
-			if root and instigatorRoot then
-				local distance = (root.Position - instigatorRoot.Position).Magnitude
-				if distance < MEUTE_RADIUS then
-					data.State = "Chasing"
-					data.Target = fleeingPlayerCharacter
-				end
+			local iRoot = instigator:FindFirstChild("HumanoidRootPart")
+			if root and iRoot and (root.Position - iRoot.Position).Magnitude < RUNNER_MEUTE then
+				data.State = "Chasing"
+				data.Target = targetChar
 			end
 		end
 	end
 end
 
--- Point aléatoire de patrouille
-local function getRandomPatrolPoint()
-	local zonePos = ZoneSetup.GetZonePosition(SPAWN_ZONE_NAME) or Vector3.new(6000, 0, 0)
-	local randomX = math.random(-250, 250)
-	local randomZ = math.random(-250, 250)
-	return Vector3.new(zonePos.X + randomX, zonePos.Y + 3, zonePos.Z + randomZ)
-end
-
--- Logique de comportement et d'animation de l'IA
 local function startRunnerBehavior(runner: Model)
 	local humanoid = runner:FindFirstChildOfClass("Humanoid")
 	local rootPart = runner:FindFirstChild("HumanoidRootPart")
@@ -86,123 +168,104 @@ local function startRunnerBehavior(runner: Model)
 		return
 	end
 
-	-- INJECTION DES ANIMATIONS DE MOUVEMENT
 	local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
 
 	local runAnim = Instance.new("Animation")
 	runAnim.AnimationId = "rbxassetid://913376220"
-
 	local idleAnim = Instance.new("Animation")
 	idleAnim.AnimationId = "rbxassetid://913402848"
 
 	local runTrack = animator:LoadAnimation(runAnim)
 	local idleTrack = animator:LoadAnimation(idleAnim)
-	local attackTrack = animator:LoadAnimation(attackAnimation) -- 🌟 Pré-chargement de l'attaque ici
+	local attackTrack = animator:LoadAnimation(attackAnimation)
 	local currentTrack = nil
 
-	local function playAnimation(newTrack)
-		if currentTrack == newTrack then
+	local function playAnim(track)
+		if currentTrack == track then
 			return
 		end
 		if currentTrack then
 			currentTrack:Stop(0.1)
 		end
-		currentTrack = newTrack
+		currentTrack = track
 		if currentTrack then
 			currentTrack:Play(0.1)
 		end
 	end
 
-	playAnimation(idleTrack)
-
-	humanoid.Running:Connect(function(speed)
-		if speed > 0.5 then
-			playAnimation(runTrack)
-			runTrack:AdjustSpeed(speed / 16)
+	playAnim(idleTrack)
+	humanoid.Running:Connect(function(spd)
+		if spd > 0.5 then
+			playAnim(runTrack)
+			runTrack:AdjustSpeed(spd / 16)
 		else
-			playAnimation(idleTrack)
+			playAnim(idleTrack)
 		end
 	end)
 
-	local runnerData = {
-		State = "Patrol",
-		Target = nil,
-		NextAttackTime = 0,
-		PatrolTarget = getRandomPatrolPoint(),
-	}
-	activeRunners[runner] = runnerData
+	local data = { State = "Patrol", Target = nil, NextAttackTime = 0, PatrolTarget = getRandomPatrolPoint() }
+	activeRunners[runner] = data
 
 	task.spawn(function()
 		while runner.Parent and humanoid.Health > 0 do
-			local currentState = runnerData.State
-
-			if currentState == "Patrol" then
-				local target, dist = findNearestTarget(rootPart)
+			if data.State == "Patrol" then
+				local target = findNearestTarget(rootPart, RUNNER_DETECTION)
 				if target then
-					runnerData.State = "Chasing"
-					runnerData.Target = target
-					alertMeute(target, runner)
+					data.State = "Chasing"
+					data.Target = target
+					alertMeuteRunners(target, runner)
 				else
-					humanoid:MoveTo(runnerData.PatrolTarget)
-					if (rootPart.Position - runnerData.PatrolTarget).Magnitude < 8 then
-						runnerData.PatrolTarget = getRandomPatrolPoint()
+					humanoid:MoveTo(data.PatrolTarget)
+					if (rootPart.Position - data.PatrolTarget).Magnitude < 8 then
+						data.PatrolTarget = getRandomPatrolPoint()
 						task.wait(math.random(1, 3))
 					end
 				end
-			elseif currentState == "Chasing" then
-				local target = runnerData.Target
+			elseif data.State == "Chasing" then
+				local target = data.Target
 				local targetRoot = target and target:FindFirstChild("HumanoidRootPart")
-				local targetHumanoid = target and target:FindFirstChildOfClass("Humanoid")
-
-				if not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 then
-					runnerData.State = "Patrol"
-					runnerData.Target = nil
-					runnerData.PatrolTarget = getRandomPatrolPoint()
+				local targetHum = target and target:FindFirstChildOfClass("Humanoid")
+				if not targetRoot or not targetHum or targetHum.Health <= 0 then
+					data.State = "Patrol"
+					data.Target = nil
+					data.PatrolTarget = getRandomPatrolPoint()
 				else
-					local distance = (rootPart.Position - targetRoot.Position).Magnitude
-					if distance > DETECTION_RADIUS * 1.5 then
-						runnerData.State = "Patrol"
-						runnerData.Target = nil
-					elseif distance <= ATTACK_RANGE then
-						runnerData.State = "Attacking"
+					local dist = (rootPart.Position - targetRoot.Position).Magnitude
+					if dist > RUNNER_DETECTION * 1.5 then
+						data.State = "Patrol"
+						data.Target = nil
+					elseif dist <= RUNNER_ATTACK_RANGE then
+						data.State = "Attacking"
 					else
 						humanoid:MoveTo(targetRoot.Position)
 					end
 				end
-			elseif currentState == "Attacking" then
-				local target = runnerData.Target
+			elseif data.State == "Attacking" then
+				local target = data.Target
 				local targetRoot = target and target:FindFirstChild("HumanoidRootPart")
-				local targetHumanoid = target and target:FindFirstChildOfClass("Humanoid")
-
-				if not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 then
-					runnerData.State = "Patrol"
-					runnerData.Target = nil
+				local targetHum = target and target:FindFirstChildOfClass("Humanoid")
+				if not targetRoot or not targetHum or targetHum.Health <= 0 then
+					data.State = "Patrol"
+					data.Target = nil
 				else
-					local distance = (rootPart.Position - targetRoot.Position).Magnitude
-					if distance > ATTACK_RANGE then
-						runnerData.State = "Chasing"
+					local dist = (rootPart.Position - targetRoot.Position).Magnitude
+					if dist > RUNNER_ATTACK_RANGE then
+						data.State = "Chasing"
 					else
-						-- On lui dit de suivre le joueur mais de s'arrêter s'il est au contact
 						humanoid:MoveTo(rootPart.Position)
-
-						if os.clock() >= runnerData.NextAttackTime then
-							runnerData.NextAttackTime = os.clock() + ATTACK_COOLDOWN
-
-							-- 🌟 FIX : Joue la piste préalablement chargée sans planter
+						if os.clock() >= data.NextAttackTime then
+							data.NextAttackTime = os.clock() + RUNNER_COOLDOWN
 							if attackTrack then
 								attackTrack:Play()
 							end
-
-							targetHumanoid:TakeDamage(ATTACK_DAMAGE)
-
-							-- Effet visuel de flash rouge sur la victime
+							targetHum:TakeDamage(RUNNER_DAMAGE)
 							task.spawn(function()
 								for _, part in target:GetChildren() do
 									if part:IsA("BasePart") then
-										local oldColor = part.Color
+										local old = part.Color
 										part.Color = Color3.fromRGB(255, 0, 0)
 										task.wait(0.1)
-										part.Color = oldColor
+										part.Color = old
 									end
 								end
 							end)
@@ -210,7 +273,6 @@ local function startRunnerBehavior(runner: Model)
 					end
 				end
 			end
-
 			task.wait(0.2)
 		end
 	end)
@@ -225,12 +287,202 @@ local function startRunnerBehavior(runner: Model)
 		end
 		RemoteEvents.MutantDied:FireAllClients(runner.Name, rootPart.Position)
 
+		-- 🌟 BLOC 2 : Loot Runner
+		dropLootToNearestPlayer(rootPart.Position, RUNNER_LOOT)
+
 		task.wait(4)
-		runner:Destroy()
+		if runner.Parent then
+			runner:Destroy()
+		end
 	end)
 end
 
--- Boucle d'apparition des mutants
+-- ═══════════════════════════════════════════════════════════════════════════
+-- TANK (ALPHA) BEHAVIOR
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Alerte TOUS les mutants (runners + tanks) dans un grand rayon autour du Tank
+local function alertAllMutants(targetChar: Model, sourcePos: Vector3)
+	for runner, data in activeRunners do
+		if data.State == "Patrol" then
+			local root = runner:FindFirstChild("HumanoidRootPart")
+			if root and (root.Position - sourcePos).Magnitude < TANK_AGGRO_RADIUS then
+				data.State = "Chasing"
+				data.Target = targetChar
+			end
+		end
+	end
+	for tank, data in activeTanks do
+		if data.State == "Patrol" then
+			local root = tank:FindFirstChild("HumanoidRootPart")
+			if root and (root.Position - sourcePos).Magnitude < TANK_AGGRO_RADIUS then
+				data.State = "Chasing"
+				data.Target = targetChar
+			end
+		end
+	end
+end
+
+local function startTankBehavior(tank: Model)
+	local humanoid = tank:FindFirstChildOfClass("Humanoid")
+	local rootPart = tank:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not rootPart then
+		return
+	end
+
+	-- Armure : on intercepte TakeDamage via un script sur le personnage
+	-- On surcharge MaxHealth pour indiquer l'armure dans les stats
+	humanoid.MaxHealth = 300
+	humanoid.Health = 300
+
+	-- Remplacer TakeDamage par une version avec armure
+	-- On passe par un script local dans le modèle du tank
+	local armorTag = Instance.new("NumberValue")
+	armorTag.Name = "Armor"
+	armorTag.Value = TANK_ARMOR
+	armorTag.Parent = tank
+
+	-- Patch : on connecte HealthChanged pour appliquer l'armure a posteriori
+	-- (La méthode propre sans OverrideHealth est de patcher dans le script d'IA)
+	local lastHealth = humanoid.Health
+	humanoid.HealthChanged:Connect(function(newHealth)
+		local delta = lastHealth - newHealth
+		if delta > 0 then
+			-- Réduire les dégâts réels en rendant une partie des PV
+			local blocked = delta * TANK_ARMOR
+			local restore = math.floor(blocked)
+			if restore > 0 then
+				humanoid.Health = math.min(humanoid.MaxHealth, newHealth + restore)
+			end
+		end
+		lastHealth = humanoid.Health
+	end)
+
+	local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
+	local attackTrack = animator:LoadAnimation(attackAnimation)
+
+	local data = {
+		State = "Patrol",
+		Target = nil,
+		NextAttackTime = 0,
+		PatrolTarget = getRandomPatrolPoint(),
+		IsCharging = false,
+	}
+	activeTanks[tank] = data
+
+	humanoid.WalkSpeed = TANK_SPEED_WALK
+
+	task.spawn(function()
+		while tank.Parent and humanoid.Health > 0 do
+			if data.State == "Patrol" then
+				local target = findNearestTarget(rootPart, TANK_DETECTION)
+				if target then
+					data.State = "Charging"
+					data.Target = target
+					-- Le Tank aggro TOUT le monde autour
+					alertAllMutants(target, rootPart.Position)
+					print("[Tank Alpha] Aggro déclenchée — alerte de zone !")
+				else
+					humanoid:MoveTo(data.PatrolTarget)
+					if (rootPart.Position - data.PatrolTarget).Magnitude < 10 then
+						data.PatrolTarget = getRandomPatrolPoint()
+						task.wait(math.random(2, 5))
+					end
+				end
+			elseif data.State == "Charging" then
+				local target = data.Target
+				local targetRoot = target and target:FindFirstChild("HumanoidRootPart")
+				local targetHum = target and target:FindFirstChildOfClass("Humanoid")
+
+				if not targetRoot or not targetHum or targetHum.Health <= 0 then
+					data.State = "Patrol"
+					data.Target = nil
+					data.IsCharging = false
+					humanoid.WalkSpeed = TANK_SPEED_WALK
+					data.PatrolTarget = getRandomPatrolPoint()
+				else
+					local dist = (rootPart.Position - targetRoot.Position).Magnitude
+					if dist > TANK_DETECTION * 2 then
+						data.State = "Patrol"
+						data.Target = nil
+						data.IsCharging = false
+						humanoid.WalkSpeed = TANK_SPEED_WALK
+					elseif dist <= TANK_ATTACK_RANGE then
+						-- En portée : passe en frappe
+						data.State = "Attacking"
+						data.IsCharging = false
+						humanoid.WalkSpeed = TANK_SPEED_WALK
+					else
+						-- Charge : vitesse x2.6
+						if not data.IsCharging then
+							data.IsCharging = true
+							humanoid.WalkSpeed = TANK_SPEED_CHARGE
+						end
+						humanoid:MoveTo(targetRoot.Position)
+					end
+				end
+			elseif data.State == "Attacking" then
+				local target = data.Target
+				local targetRoot = target and target:FindFirstChild("HumanoidRootPart")
+				local targetHum = target and target:FindFirstChildOfClass("Humanoid")
+
+				if not targetRoot or not targetHum or targetHum.Health <= 0 then
+					data.State = "Patrol"
+					data.Target = nil
+					data.IsCharging = false
+					humanoid.WalkSpeed = TANK_SPEED_WALK
+				else
+					local dist = (rootPart.Position - targetRoot.Position).Magnitude
+					if dist > TANK_ATTACK_RANGE * 1.5 then
+						data.State = "Charging"
+					else
+						humanoid:MoveTo(rootPart.Position)
+						if os.clock() >= data.NextAttackTime then
+							data.NextAttackTime = os.clock() + TANK_COOLDOWN
+							if attackTrack then
+								attackTrack:Play()
+							end
+							-- Les dégâts du Tank sont bruts (l'armure du joueur n'existe pas encore)
+							targetHum:TakeDamage(TANK_DAMAGE)
+							-- Flash orange (couleur distincte du Runner)
+							task.spawn(function()
+								for _, part in target:GetChildren() do
+									if part:IsA("BasePart") then
+										local old = part.Color
+										part.Color = Color3.fromRGB(255, 140, 0)
+										task.wait(0.15)
+										part.Color = old
+									end
+								end
+							end)
+						end
+					end
+				end
+			end
+			task.wait(0.2)
+		end
+	end)
+
+	humanoid.Died:Connect(function()
+		activeTanks[tank] = nil
+		if attackTrack then
+			attackTrack:Stop(0.05)
+		end
+		RemoteEvents.MutantDied:FireAllClients(tank.Name, rootPart.Position)
+
+		-- 🌟 BLOC 2 : Loot Tank (enrichi)
+		dropLootToNearestPlayer(rootPart.Position, TANK_LOOT)
+
+		task.wait(6)
+		if tank.Parent then
+			tank:Destroy()
+		end
+	end)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SPAWN LOOP
+-- ═══════════════════════════════════════════════════════════════════════════
 function MutantService.InitSpawning()
 	local zoneFolder = ZoneSetup.GetZoneFolder(SPAWN_ZONE_NAME)
 	if not zoneFolder then
@@ -238,35 +490,55 @@ function MutantService.InitSpawning()
 		return
 	end
 
+	-- Boucle Runners
 	task.spawn(function()
 		while true do
-			local currentCount = 0
+			local count = 0
 			for _ in activeRunners do
-				currentCount += 1
+				count += 1
 			end
-
-			if currentCount < MAX_RUNNERS then
-				local spawnNeeded = MAX_RUNNERS - currentCount
-				for i = 1, spawnNeeded do
+			if count < MAX_RUNNERS then
+				for _ = 1, MAX_RUNNERS - count do
 					local clone = runnerTemplate:Clone()
-					local randomSpawnPos = getRandomPatrolPoint()
-
-					clone:SetPrimaryPartCFrame(CFrame.new(randomSpawnPos + Vector3.new(0, 5, 0)))
+					clone:SetPrimaryPartCFrame(CFrame.new(getRandomPatrolPoint() + Vector3.new(0, 5, 0)))
 					clone.Parent = zoneFolder
-
-					-- On s'assure qu'ils ont une vitesse équilibrée
-					local humanoid = clone:FindFirstChildOfClass("Humanoid")
-					if humanoid then
-						humanoid.WalkSpeed = 15
+					local hum = clone:FindFirstChildOfClass("Humanoid")
+					if hum then
+						hum.WalkSpeed = RUNNER_SPEED
 					end
-
 					startRunnerBehavior(clone)
 				end
-				print("[MUTANT SERVICE] Vague de Runners générée. Total actif : " .. MAX_RUNNERS)
+				print("[MUTANT SERVICE] Vague Runners. Total actif : " .. MAX_RUNNERS)
 			end
 			task.wait(10)
 		end
 	end)
+
+	-- Boucle Tanks (si le template existe)
+	if tankTemplate then
+		task.spawn(function()
+			while true do
+				local count = 0
+				for _ in activeTanks do
+					count += 1
+				end
+				if count < MAX_TANKS then
+					for _ = 1, MAX_TANKS - count do
+						local clone = tankTemplate:Clone()
+						clone:SetPrimaryPartCFrame(CFrame.new(getRandomPatrolPoint() + Vector3.new(0, 5, 0)))
+						clone.Parent = zoneFolder
+						startTankBehavior(clone)
+					end
+					print("[MUTANT SERVICE] Spawn Tank Alpha. Total actif : " .. MAX_TANKS)
+				end
+				task.wait(30) -- les Tanks spawent moins souvent
+			end
+		end)
+	else
+		warn(
+			"[MUTANT SERVICE] MutantTank introuvable dans ServerStorage/Monsters — tank désactivé. Crée le modèle en Studio."
+		)
+	end
 end
 
 return MutantService
