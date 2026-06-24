@@ -29,7 +29,7 @@ local RUNNER_MEUTE = 45
 local RUNNER_ATTACK_RANGE = 4
 local RUNNER_DAMAGE = 15
 local RUNNER_COOLDOWN = 1.2
-local RUNNER_SPEED = 15
+local RUNNER_SPEED = 9
 
 -- ─── CONFIG TANK ─────────────────────────────────────────────────────────────
 local MAX_TANKS = 2
@@ -37,8 +37,8 @@ local TANK_DETECTION = 50 -- aggro de zone large
 local TANK_ATTACK_RANGE = 6
 local TANK_DAMAGE = 30
 local TANK_COOLDOWN = 2.0
-local TANK_SPEED_WALK = 10
-local TANK_SPEED_CHARGE = 26 -- vitesse de charge (x2.6)
+local TANK_SPEED_WALK = 5
+local TANK_SPEED_CHARGE = 12 -- vitesse de charge (x2.6)
 local TANK_ARMOR = 0.80 -- 80% réduction des dégâts
 local TANK_AGGRO_RADIUS = 80 -- alerte tous les mutants dans ce rayon
 
@@ -331,24 +331,18 @@ local function startTankBehavior(tank: Model)
 	end
 
 	-- Armure : on intercepte TakeDamage via un script sur le personnage
-	-- On surcharge MaxHealth pour indiquer l'armure dans les stats
 	humanoid.MaxHealth = 300
 	humanoid.Health = 300
 
-	-- Remplacer TakeDamage par une version avec armure
-	-- On passe par un script local dans le modèle du tank
 	local armorTag = Instance.new("NumberValue")
 	armorTag.Name = "Armor"
 	armorTag.Value = TANK_ARMOR
 	armorTag.Parent = tank
 
-	-- Patch : on connecte HealthChanged pour appliquer l'armure a posteriori
-	-- (La méthode propre sans OverrideHealth est de patcher dans le script d'IA)
 	local lastHealth = humanoid.Health
 	humanoid.HealthChanged:Connect(function(newHealth)
 		local delta = lastHealth - newHealth
 		if delta > 0 then
-			-- Réduire les dégâts réels en rendant une partie des PV
 			local blocked = delta * TANK_ARMOR
 			local restore = math.floor(blocked)
 			if restore > 0 then
@@ -359,7 +353,48 @@ local function startTankBehavior(tank: Model)
 	end)
 
 	local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
+
+	-- ─── 🌟 AJOUT : CHARGEMENT DES ANIMATIONS DU TANK ───
+	local runAnim = Instance.new("Animation")
+	runAnim.AnimationId = "rbxassetid://913376220" -- Tu peux mettre un ID spécifique au Tank si tu en as un
+	local idleAnim = Instance.new("Animation")
+	idleAnim.AnimationId = "rbxassetid://913402848" -- Tu peux mettre un ID spécifique au Tank si tu en as un
+
+	local runTrack = animator:LoadAnimation(runAnim)
+	local idleTrack = animator:LoadAnimation(idleAnim)
 	local attackTrack = animator:LoadAnimation(attackAnimation)
+
+	-- Forcer la priorité de l'attaque pour qu'elle passe au-dessus de la course
+	attackTrack.Priority = Enum.AnimationPriority.Action
+
+	local currentTrack = nil
+	local function playAnim(track)
+		if currentTrack == track then
+			return
+		end
+		if currentTrack then
+			currentTrack:Stop(0.1)
+		end
+		currentTrack = track
+		if currentTrack then
+			currentTrack:Play(0.1)
+		end
+	end
+
+	-- Lancement de l'état de repos initial
+	playAnim(idleTrack)
+
+	-- ─── 🌟 AJOUT : GESTION DYNAMIQUE DE LA MARCHE ET DE LA CHARGE ───
+	humanoid.Running:Connect(function(spd)
+		if spd > 0.5 then
+			playAnim(runTrack)
+			-- On ajuste la vitesse de l'animation selon la vitesse réelle (marche vs charge)
+			-- Si le tank charge à 26, l'animation accélérera pour correspondre à ses pas
+			runTrack:AdjustSpeed(spd / 14)
+		else
+			playAnim(idleTrack)
+		end
+	end)
 
 	local data = {
 		State = "Patrol",
@@ -379,7 +414,6 @@ local function startTankBehavior(tank: Model)
 				if target then
 					data.State = "Charging"
 					data.Target = target
-					-- Le Tank aggro TOUT le monde autour
 					alertAllMutants(target, rootPart.Position)
 					print("[Tank Alpha] Aggro déclenchée — alerte de zone !")
 				else
@@ -408,12 +442,10 @@ local function startTankBehavior(tank: Model)
 						data.IsCharging = false
 						humanoid.WalkSpeed = TANK_SPEED_WALK
 					elseif dist <= TANK_ATTACK_RANGE then
-						-- En portée : passe en frappe
 						data.State = "Attacking"
 						data.IsCharging = false
 						humanoid.WalkSpeed = TANK_SPEED_WALK
 					else
-						-- Charge : vitesse x2.6
 						if not data.IsCharging then
 							data.IsCharging = true
 							humanoid.WalkSpeed = TANK_SPEED_CHARGE
@@ -442,9 +474,8 @@ local function startTankBehavior(tank: Model)
 							if attackTrack then
 								attackTrack:Play()
 							end
-							-- Les dégâts du Tank sont bruts (l'armure du joueur n'existe pas encore)
 							targetHum:TakeDamage(TANK_DAMAGE)
-							-- Flash orange (couleur distincte du Runner)
+
 							task.spawn(function()
 								for _, part in target:GetChildren() do
 									if part:IsA("BasePart") then
@@ -465,12 +496,14 @@ local function startTankBehavior(tank: Model)
 
 	humanoid.Died:Connect(function()
 		activeTanks[tank] = nil
+		if currentTrack then
+			currentTrack:Stop(0.05)
+		end
 		if attackTrack then
 			attackTrack:Stop(0.05)
 		end
 		RemoteEvents.MutantDied:FireAllClients(tank.Name, rootPart.Position)
 
-		-- 🌟 BLOC 2 : Loot Tank (enrichi)
 		dropLootToNearestPlayer(rootPart.Position, TANK_LOOT)
 
 		task.wait(6)

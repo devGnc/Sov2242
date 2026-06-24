@@ -78,8 +78,6 @@ local function ensurePrompt(parent: Instance, name: string, actionText: string, 
 	return prompt
 end
 
--- 🌟 NETTOYAGE : La fonction ensureRecruiterNpc() qui créait le bloc gris a été supprimée d'ici.
-
 -- Point de transit en Zone de Test
 local function ensureTestToBaseTeleporter()
 	local testFolder = ZoneSetup.GetZoneFolder(ZONE_TEST)
@@ -162,6 +160,7 @@ moveCharacterToSpawn = function(player: Player, spawn: SpawnLocation?)
 	end
 
 	local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	-- ✅ CORRECTION : Si le rootPart n'existe PAS, on s'arrête. S'il existe, on continue !
 	if not rootPart then
 		return false
 	end
@@ -169,7 +168,6 @@ moveCharacterToSpawn = function(player: Player, spawn: SpawnLocation?)
 	rootPart.CFrame = spawn.CFrame + Vector3.new(0, 5, 0)
 	return true
 end
-
 local function teleportPlayerToPlace(player: Player, destinationPlaceId: number, sourceZoneName: string)
 	if destinationPlaceId <= 0 then
 		warn(("Aucun ID de place valide pour la Terre désolée depuis %s."):format(sourceZoneName))
@@ -232,8 +230,8 @@ local function ensureReturnTeleporter(
 	padName: string,
 	offset: Vector3,
 	destinationSpawnZone: string,
-	actionText: string, -- 🌟 AJOUT
-	objectText: string -- 🌟 AJOUT
+	actionText: string,
+	objectText: string
 )
 	local sourceFolder = ZoneSetup.GetZoneFolder(sourceZoneName)
 	if not sourceFolder then
@@ -255,7 +253,6 @@ local function ensureReturnTeleporter(
 		pad = padPart
 	end
 
-	-- 🌟 MODIFICATION : On utilise les textes passés en paramètres ici
 	local prompt = ensurePrompt(pad, "ReturnToMainPlacePrompt", actionText, objectText)
 
 	prompt.Triggered:Connect(function(player: Player)
@@ -277,6 +274,7 @@ local function ensureReturnTeleporter(
 		teleportPlayerBackToMainPlace(player, destinationSpawnZone, sourceZoneName)
 	end)
 end
+
 local function getSpawnFromFaction(faction: string): SpawnLocation?
 	if faction == FACTION_SOLDIER then
 		return ZoneSetup.GetSpawnPoint(ZONE_BASE)
@@ -365,16 +363,13 @@ end
 
 -- ─── INITIALISATION MAPS ET TÉLÉPORTEURS ──────────────────────────────────────
 if isStudio or not isTerreDesoleePlace then
-	-- 🌟 Le revoilà ! C'est cette ligne qui avait disparu :
 	ensureTestToBaseTeleporter()
 
-	-- Portails d'aller vers la Terre désolée depuis les Hubs
 	ensureTerreDesoleeTeleporter(ZONE_BASE, "TeleportToTerreDesolee", Vector3.new(18, 1, 0))
 	ensureTerreDesoleeTeleporter(ZONE_NID, "TeleportToTerreDesolee", Vector3.new(18, 1, 0))
 end
 
 if isStudio or isTerreDesoleePlace then
-	-- Portails de retour différenciés avec leurs textes uniques
 	ensureReturnTeleporter(
 		ZONE_TERRE_DESOLEE,
 		"ReturnToBase",
@@ -393,7 +388,6 @@ if isStudio or isTerreDesoleePlace then
 	)
 end
 
--- Écouteur pour l'UI FactionChoiceClient
 local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
 RemoteEvents.SetFaction.OnServerEvent:Connect(function(player: Player, data)
 	if type(data) == "table" and data.faction then
@@ -484,19 +478,42 @@ local function devResetData(player: Player)
 	spawnPlayer(player)
 end
 
-Players.PlayerAdded:Connect(function(player)
-	if player.UserId ~= CREATOR_ID then
+-- ─── ÉCOUTE DES COMMANDES DEV (MODIFIÉ) ──────────────────────────────────────
+-- ─── ÉCOUTE DES COMMANDES DEV (BÉTONNÉE POUR LE STUDIO) ──────────────────────
+local function registerDevCommands(player: Player)
+	-- On autorise la commande si c'est ton ID OU si tu es en train de tester dans Studio
+	if player.UserId ~= CREATOR_ID and not RunService:IsStudio() then
 		return
 	end
 
+	print("[DEV SYSTEM] Commandes prêtes pour : " .. player.Name)
+
 	player.Chatted:Connect(function(message)
-		if message:lower() == "/resetdata" then
-			print("[DEV COMMAND] Taper /resetdata détecté pour " .. player.Name)
+		local cleanedMessage = message:lower()
+
+		if cleanedMessage == "/resetdata" then
+			print("[DEV COMMAND] Réinitialisation des données pour " .. player.Name)
 			devResetData(player)
+		elseif cleanedMessage == "/give fusil" then
+			-- On applique l'attribut requis par ton WeaponController
+			player:SetAttribute("EquippedWeapon", "Fusil")
+
+			-- IMPORTANT : On affiche un gros message dans la console de test (F9) pour valider
+			print("=========================================")
+			print("[DEV COMMAND] FUSIL ACTIVÉ POUR " .. player.Name:upper())
+			print("Clique gauche pour tirer (Raycast actif) !")
+			print("=========================================")
 		end
 	end)
-end)
+end
 
+-- Sécurité pour les prochains joueurs
+Players.PlayerAdded:Connect(registerDevCommands)
+
+-- Application immédiate pour toi dans Studio
+for _, player in Players:GetPlayers() do
+	task.spawn(registerDevCommands, player)
+end
 if RunService:IsStudio() then
 	Players.PlayerAdded:Connect(function(player)
 		if player.UserId ~= CREATOR_ID then
