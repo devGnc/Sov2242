@@ -33,8 +33,8 @@ function CombatService.AddSessionLoot(player: Player, itemName: string, quantity
 	end
 	sessionLoot[player][itemName] = (sessionLoot[player][itemName] or 0) + quantity
 
-	-- 🌟 SYNCHRONISATION UI :
-	player:SetAttribute("Loot_" .. itemName, sessionLoot[player][itemName])
+	local safeName = string.gsub(itemName, " ", "_")
+	player:SetAttribute("Loot_" .. safeName, sessionLoot[player][itemName])
 end
 
 -- Exposé pour que LootBagModule puisse créditer le pilleur (Bug 3)

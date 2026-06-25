@@ -21,6 +21,10 @@
       },
       "Packages": {
         "$path": "Packages"
+      },
+      "Assets": {
+        "$className": "Folder",
+        "$path": "assets"
       }
     },
 

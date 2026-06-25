@@ -53,6 +53,7 @@ local RequestLoot = getOrCreate(folder, "RequestLoot", "RemoteEvent") -- { bagId
 local WeaponFire = getOrCreate(folder, "WeaponFire", "RemoteEvent") -- { origin, direction, weaponName }
 local WeaponMelee = getOrCreate(folder, "WeaponMelee", "RemoteEvent") -- { weaponName }
 local SetFaction = getOrCreate(folder, "SetFaction", "RemoteEvent")
+local EquipWeapon = getOrCreate(folder, "EquipWeapon", "RemoteEvent")
 
 return {
 	UpdateHealth = UpdateHealth :: RemoteEvent,
@@ -65,4 +66,5 @@ return {
 	WeaponFire = WeaponFire :: RemoteEvent,
 	WeaponMelee = WeaponMelee :: RemoteEvent,
 	SetFaction = SetFaction :: RemoteEvent,
+	EquipWeapon = EquipWeapon :: RemoteEvent,
 }

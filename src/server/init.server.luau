@@ -1,3 +1,4 @@
+-- src/server/init.server.luau
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,6 +10,9 @@ local MutantService = require(script.MutantService)
 local ProfileService = require(ServerScriptService.ServerPackages.profileservice)
 local ZoneSetup = require(script.ZoneSetup)
 local PlaceConfig = require(ReplicatedStorage.Shared.PlaceConfig)
+
+-- 🌟 RECTIFICATION : On charge le WeaponService pour que le serveur écoute les RemoteEvents de tir
+require(script.WeaponService)
 
 Players.CharacterAutoLoads = false
 

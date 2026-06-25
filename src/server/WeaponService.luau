@@ -1,8 +1,5 @@
--- WeaponService.luau
--- Gère les attaques distance (raycast) et mêlée côté SERVEUR.
--- Corrections Bloc 1 :
---   • Config importée depuis WeaponConfig partagé (plus de duplication)
---   • Vérification faction avant application des dégâts (feu amical OFF)
+-- src/server/WeaponService.luau
+-- Gère les tirs (raycast), le corps à corps, et l'ÉQUIPEMENT PHYSIQUE SÉCURISÉ côté SERVEUR.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,7 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RemoteEvents = require(ReplicatedStorage.Shared.RemoteEvents)
 local WeaponConfig = require(ReplicatedStorage.Shared.WeaponConfig)
 
--- ─── Cooldowns serveur ────────────────────────────────────────────────────────
+local WeaponsAssets = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Weapons")
 local playerCooldowns: { [Player]: { [string]: number } } = {}
 
 local function checkCooldown(player: Player, weaponName: string): boolean
@@ -22,7 +19,6 @@ local function checkCooldown(player: Player, weaponName: string): boolean
 	if not playerCooldowns[player] then
 		playerCooldowns[player] = {}
 	end
-
 	local last = playerCooldowns[player][weaponName] or 0
 	local now = os.clock()
 	if now - last < config.Cooldown then
@@ -33,26 +29,18 @@ local function checkCooldown(player: Player, weaponName: string): boolean
 	return true
 end
 
--- ─── Vérification faction (feu amical désactivé) ──────────────────────────────
--- Retourne true si l'attaquant et la cible sont dans la MÊME faction.
--- Dans ce cas, les dégâts sont bloqués.
 local function sameFaction(attacker: Player, targetModel: Model): boolean
-	-- Vérifier si la cible est un joueur
 	local targetPlayer = Players:GetPlayerFromCharacter(targetModel)
 	if not targetPlayer then
-		-- 🌟 RECTIFICATION : La cible n'est pas un joueur (c'est un mutant)
-		-- On retourne toujours 'false' pour AUTORISER les dégâts PvE !
 		return false
 	end
 
 	local attackerFaction = attacker:GetAttribute("Faction") or "None"
 	local targetFaction = targetPlayer:GetAttribute("Faction") or "None"
 
-	-- Si l'un des deux JOUEURS n'a pas choisi de camp, on bloque le PvP
 	if attackerFaction == "None" or targetFaction == "None" then
 		return true
 	end
-
 	return attackerFaction == targetFaction
 end
 
@@ -62,25 +50,95 @@ local function applyDamage(attacker: Player, targetModel: Model, damage: number)
 		return
 	end
 
-	-- On vérifie si la cible est un joueur réel (pour le PvP)
 	local targetPlayer = game.Players:GetPlayerFromCharacter(targetModel)
-
 	if targetPlayer then
-		-- ─── LOGIQUE PVP (Joueur contre Joueur) ───
 		if sameFaction(attacker, targetModel) then
 			return
-		end -- Bloque le friendly fire
+		end
 		humanoid:TakeDamage(damage)
-		print(("[WeaponService] PvP : %s → %s (%d dmg)"):format(attacker.Name, targetPlayer.Name, damage))
 	else
-		-- ─── LOGIQUE PVE (Joueur contre Mutant) ───
-		-- Les mutants n'ont pas de faction, on leur met les dégâts directement !
 		humanoid:TakeDamage(damage)
-		print(("[WeaponService] PvE : %s → %s (%d dmg)"):format(attacker.Name, targetModel.Name, damage))
 	end
 end
 
--- ─── Tir à distance (CORRIGÉ) ───────────────────────────────────────────────────────────
+-- ─── SÉCURISATION ET ALIGNEMENT VISUEL ────────────────────────────────────────
+local function handleVisualEquip(player: Player, weaponName: string)
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	-- 1. Suppression nette de l'ancienne arme
+	for _, child in ipairs(character:GetChildren()) do
+		if child:GetAttribute("IsWeapon") == true then
+			child:Destroy()
+		end
+	end
+
+	local weaponTemplate = WeaponsAssets:FindFirstChild(weaponName)
+	if not weaponTemplate then
+		warn(("[WeaponService] Modèle introuvable dans ReplicatedStorage.Assets.Weapons : " .. tostring(weaponName)))
+		return
+	end
+
+	local config = WeaponConfig[weaponName]
+	local weaponClone = weaponTemplate:Clone()
+
+	weaponClone.Name = weaponName
+	weaponClone:SetAttribute("IsWeapon", true)
+
+	-- 🛡️ SÉCURITÉ PHYSIQUE CRUCIALE : Neutraliser TOUTES les pièces avant insertion dans le personnage
+	-- (Évite les forces résiduelles de la Toolbox qui font péter un câble au perso)
+	for _, part in ipairs(weaponClone:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CanCollide = false
+			part.Anchored = false
+			part.Massless = true
+		elseif part:IsA("BodyMover") or part:IsA("Constraint") then
+			part:Destroy()
+		end
+	end
+
+	local handle = weaponClone:FindFirstChild("Handle") :: BasePart?
+	local rightHand = character:WaitForChild("RightHand", 5) :: BasePart?
+
+	if rightHand and handle then
+		-- 🔗 SOUDAGE MATRICIEL INTERNE : On force l'assemblage de toutes les pièces au Handle
+		for _, part in ipairs(weaponClone:GetDescendants()) do
+			if part:IsA("BasePart") and part ~= handle then
+				local internalWeld = Instance.new("WeldConstraint")
+				internalWeld.Part0 = handle
+				internalWeld.Part1 = part
+				internalWeld.Parent = part
+			end
+		end
+
+		-- 📐 APPLICATION DU GRIP (ALIGNEMENT)
+		local offset = (config and config.GripOffset) or CFrame.new()
+		handle.CFrame = rightHand.CFrame * offset
+
+		-- Parentage sécurisé : L'arme devient visible et solidaire du joueur
+		weaponClone.Parent = character
+
+		-- Soudure mécanique finale au poignet droit
+		local handWeld = Instance.new("WeldConstraint")
+		handWeld.Name = "HandWeaponWeld"
+		handWeld.Part0 = rightHand
+		handWeld.Part1 = handle
+		handWeld.Parent = handle
+	end
+end
+
+RemoteEvents.EquipWeapon.OnServerEvent:Connect(function(player: Player, data)
+	if type(data) == "table" and data.weaponName then
+		if WeaponConfig[data.weaponName] then
+			player:SetAttribute("EquippedWeapon", data.weaponName)
+			handleVisualEquip(player, data.weaponName)
+		end
+	end
+end)
+
+-- ─── ÉCOUTEURS DE TIR ET MÊLÉE ────────────────────────────────────────────────
 RemoteEvents.WeaponFire.OnServerEvent:Connect(function(player: Player, data)
 	if not data or not data.weaponName or not data.origin or not data.direction then
 		return
@@ -99,11 +157,8 @@ RemoteEvents.WeaponFire.OnServerEvent:Connect(function(player: Player, data)
 		return
 	end
 
-	-- 🌟 CORRECTION SÉCURITÉ : La caméra en 3e personne est souvent à plus de 10 studs du corps.
-	-- On monte la tolérance à 120 studs pour permettre de tirer confortablement dézoomé.
 	local distCheck = (character.HumanoidRootPart.Position - data.origin).Magnitude
 	if distCheck > 120 then
-		warn(("[ANTI-CHEAT] Tir rejeté pour %s : Caméra trop éloignée du corps."):format(player.Name))
 		return
 	end
 
@@ -120,7 +175,6 @@ RemoteEvents.WeaponFire.OnServerEvent:Connect(function(player: Player, data)
 	end
 end)
 
--- ─── Corps à corps ────────────────────────────────────────────────────────────
 RemoteEvents.WeaponMelee.OnServerEvent:Connect(function(player: Player, data)
 	if not data or not data.weaponName then
 		return
@@ -140,30 +194,26 @@ RemoteEvents.WeaponMelee.OnServerEvent:Connect(function(player: Player, data)
 	end
 
 	local origin = character.HumanoidRootPart.Position
-
-	-- 🌟 CORRECTION : Zone sphérique ultra-optimisée
 	local overlapParams = OverlapParams.new()
 	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 	overlapParams.FilterDescendantsInstances = { character }
 
 	local partsInZone = workspace:GetPartBoundsInRadius(origin, config.Range, overlapParams)
-	local alreadyHit = {} -- Pour ne pas frapper deux fois le même modèle
+	local alreadyHit = {}
 
 	for _, part in partsInZone do
 		local model = part:FindFirstAncestorOfClass("Model")
 		if model and not alreadyHit[model] then
 			alreadyHit[model] = true
 			local root = model:FindFirstChild("HumanoidRootPart")
-
 			if root then
 				applyDamage(player, model, config.Damage)
-				break -- Un seul coup réussi par clic
+				break
 			end
 		end
 	end
 end)
 
--- ─── Nettoyage ────────────────────────────────────────────────────────────────
 Players.PlayerRemoving:Connect(function(player: Player)
 	playerCooldowns[player] = nil
 end)
