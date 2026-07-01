@@ -16,7 +16,34 @@ rojo serve
 
 For more help, check out [the Rojo documentation](https://rojo.space/docs).
 
-## Terre désolée
+## Arborescence
 
-La Terre désolée est téléportée vers une autre place Roblox via `src/shared/PlaceConfig.luau`.
-Renseigne `MainPlaceId` pour la Base/Nid et `TerreDesoleePlaceId` pour la Terre désolée, puis utilise les portails des deux côtés.
+Sov2242.git/
+├── .gitignore
+├── .vscode/
+│   └── settings.json
+├── README.md
+├── aftman.toml
+├── default.project.json
+├── rokit.toml
+├── selene.toml
+├── src/
+│   ├── client/
+│   │   ├── FactionChoiceClient.luau
+│   │   ├── HealthBarClient.luau
+│   │   ├── WeaponController.luau
+│   │   └── init.client.luau
+│   ├── server/
+│   │   ├── CombatService.luau
+│   │   ├── MutantService.luau
+│   │   ├── WeaponService.luau
+│   │   ├── ZoneSetup.luau
+│   │   └── init.server.luau
+│   └── shared/
+│       ├── Hello.luau
+│       ├── LootBagModule.luau
+│       ├── PlaceConfig.luau
+│       ├── RemoteEvents.luau
+│       └── WeaponConfig.luau
+├── wally.lock
+└── wally.toml
