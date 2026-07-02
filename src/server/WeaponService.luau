@@ -129,12 +129,23 @@ local function handleVisualEquip(player: Player, weaponName: string)
 	end
 end
 
+local WeaponService = {}
+
+-- ⚙️ Point d'entrée UNIQUE pour équiper une arme (logique + visuel toujours synchro)
+-- Utilisé à la fois par le RemoteEvent client ET par les commandes dev (/give ...)
+function WeaponService.EquipWeapon(player: Player, weaponName: string)
+	if not WeaponConfig[weaponName] then
+		warn(("[WeaponService] Config d'arme introuvable : %s"):format(tostring(weaponName)))
+		return
+	end
+
+	player:SetAttribute("EquippedWeapon", weaponName)
+	handleVisualEquip(player, weaponName)
+end
+
 RemoteEvents.EquipWeapon.OnServerEvent:Connect(function(player: Player, data)
 	if type(data) == "table" and data.weaponName then
-		if WeaponConfig[data.weaponName] then
-			player:SetAttribute("EquippedWeapon", data.weaponName)
-			handleVisualEquip(player, data.weaponName)
-		end
+		WeaponService.EquipWeapon(player, data.weaponName)
 	end
 end)
 
@@ -218,4 +229,4 @@ Players.PlayerRemoving:Connect(function(player: Player)
 	playerCooldowns[player] = nil
 end)
 
-return {}
+return WeaponService

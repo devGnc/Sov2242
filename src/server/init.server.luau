@@ -12,7 +12,7 @@ local ZoneSetup = require(script.ZoneSetup)
 local PlaceConfig = require(ReplicatedStorage.Shared.PlaceConfig)
 
 -- 🌟 RECTIFICATION : On charge le WeaponService pour que le serveur écoute les RemoteEvents de tir
-require(script.WeaponService)
+local WeaponService = require(script.WeaponService)
 
 Players.CharacterAutoLoads = false
 
@@ -499,12 +499,13 @@ local function registerDevCommands(player: Player)
 			print("[DEV COMMAND] Réinitialisation des données pour " .. player.Name)
 			devResetData(player)
 		elseif cleanedMessage == "/give fusil" then
-			-- On applique l'attribut requis par ton WeaponController
-			player:SetAttribute("EquippedWeapon", "Fusil")
+			-- On passe par le vrai point d'entrée (attribut + weld visuel synchronisés)
+			-- ⚠️ Le seul fusil du jeu est "FusilAssaut" (modèle dans Assets.Weapons.FusilAssaut)
+			WeaponService.EquipWeapon(player, "FusilAssaut")
 
 			-- IMPORTANT : On affiche un gros message dans la console de test (F9) pour valider
 			print("=========================================")
-			print("[DEV COMMAND] FUSIL ACTIVÉ POUR " .. player.Name:upper())
+			print("[DEV COMMAND] FUSIL D'ASSAUT ACTIVÉ POUR " .. player.Name:upper())
 			print("Clique gauche pour tirer (Raycast actif) !")
 			print("=========================================")
 		end

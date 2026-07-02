@@ -57,7 +57,7 @@ local function playMuzzleVFX(character: Model)
 end
 
 local function onActivated()
-	local currentWeapon = player:GetAttribute("EquippedWeapon") or "Fusil"
+	local currentWeapon = player:GetAttribute("EquippedWeapon") or "FusilAssaut"
 	local character = player.Character
 	if not character then
 		return
@@ -102,14 +102,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
 	-- Raccourcis clavier mis à jour pour appeler notre nouvelle fonction de switch
 	if input.KeyCode == Enum.KeyCode.One then
-		requestWeaponSwitch("Fusil")
+		requestWeaponSwitch("FusilAssaut")
 	elseif input.KeyCode == Enum.KeyCode.Two then
 		requestWeaponSwitch("Pistolet")
 	elseif input.KeyCode == Enum.KeyCode.Three then
 		requestWeaponSwitch("Couteau")
-	elseif input.KeyCode == Enum.KeyCode.Four then
-		-- 🌟 Touche 4 pour équiper le magnifique fusil d'assaut
-		requestWeaponSwitch("FusilAssaut")
 	end
 
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Gamepad1 then
@@ -118,6 +115,6 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 -- Initialisation de l'arme de base au spawn
-requestWeaponSwitch("Fusil")
+requestWeaponSwitch("FusilAssaut")
 
 return nil

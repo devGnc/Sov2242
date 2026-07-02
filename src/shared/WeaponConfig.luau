@@ -10,7 +10,6 @@ export type WeaponData = {
 }
 
 local WeaponConfig: { [string]: WeaponData } = {
-	["Fusil"] = { Damage = 25, Range = 150, Cooldown = 0.5, Type = "Distance" },
 	["Pistolet"] = { Damage = 15, Range = 80, Cooldown = 0.3, Type = "Distance" },
 	["Couteau"] = { Damage = 35, Range = 6, Cooldown = 0.7, Type = "Melee" },
 	["FusilAssaut"] = { Damage = 20, Range = 120, Cooldown = 0.12, Type = "Distance" },
