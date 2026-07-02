@@ -12,7 +12,6 @@
         "$path": "ServerPackages"
       }
     },
-
     "ReplicatedStorage": {
       "$className": "ReplicatedStorage",
       "Shared": {
@@ -24,7 +23,9 @@
       },
       "Assets": {
         "$className": "Folder",
-        "$path": "assets/weapons"
+        "Weapons": {
+          "$path": "assets/weapons"
+        }
       }
     },
 
