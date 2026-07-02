@@ -24,7 +24,7 @@
       },
       "Assets": {
         "$className": "Folder",
-        "$path": "assets"
+        "$path": "assets/weapons"
       }
     },
 
